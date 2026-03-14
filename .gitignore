@@ -1,0 +1,17 @@
+# python虚拟环境
+venv/
+.venv/
+
+# python缓存
+__pycache__/
+*.pyc
+
+# vscode
+.vscode/
+
+# 数据集
+data/
+
+# 模型
+*.pt
+*.pth
