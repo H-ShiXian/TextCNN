@@ -1,96 +1,71 @@
 # -*- coding: utf-8 -*-
+"""
+TextCNN 训练脚本
+
+流程：加载数据 → 文本转索引 → 构建 DataLoader → 训练模型 → 保存最优模型
+
+使用方法：
+  1. 先运行 vocab_built.py 构建词表和标签映射
+  2. 再运行本脚本进行训练
+"""
+
 import json
 import torch
-import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
-import jieba
-from model.textcnn_model import TextCNN  # 导入我们上一步写好的 TextCNN
+from model.textcnn_model import TextCNN
+from config import (
+    TRAIN_PATH, VAL_PATH, TEST_PATH,
+    VOCAB_PATH, LABEL_PATH, MODEL_PATH,
+    EMBED_DIM, BATCH_SIZE, NUM_EPOCHS, LEARNING_RATE, DROPOUT,
+    load_data, texts_to_indices,
+)
 
 
+# =============================
+# 1. 加载数据
+# =============================
 
+train_texts, train_labels = load_data(TRAIN_PATH)
+val_texts, val_labels = load_data(VAL_PATH)
+test_texts, test_labels = load_data(TEST_PATH)
 
-def load_data(file_path):
-    texts = []
-    labels = []
-    with open(file_path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            label, text = line.split(maxsplit=1)  # 防止文本中有空格
-            labels.append(label)
-            texts.append(text)
-    return texts, labels
-
-train_texts, train_labels = load_data("data/train.txt")
-val_texts, val_labels = load_data("data/val.txt")
-test_texts, test_labels = load_data("data/test.txt")
-
-
-
-# # 构建词表
-# all_words = []
-# for text in train_texts:
-#     all_words.extend(jieba.lcut(text))
-
-# vocab = {"<PAD>":0, "<UNK>":1}
-# index = 2
-# for word in all_words:
-#     if word not in vocab:
-#         vocab[word] = index
-#         index += 1
-
-# # 保存词表
-
-# with open("vocab.json", "w", encoding="utf-8") as f:
-#     json.dump(vocab, f, ensure_ascii=False, indent=4)
-
-# # 标签映射
-# label_set = sorted(list(set(train_labels)))
-# label2idx = {label:i for i, label in enumerate(label_set)}
-# with open("label.json", "w", encoding="utf-8") as f:
-#     json.dump(label2idx, f, ensure_ascii=False, indent=4)
-
-
-
-# 读取 vocab
-with open("data/vocab.json", "r", encoding="utf-8") as f:
+# 加载预构建的词表和标签映射（由 vocab_built.py 生成）
+with open(VOCAB_PATH, "r", encoding="utf-8") as f:
     vocab = json.load(f)
 
-# 读取 label
-with open("data/label.json", "r", encoding="utf-8") as f:
+with open(LABEL_PATH, "r", encoding="utf-8") as f:
     label2idx = json.load(f)
+
 label_set = sorted(list(set(train_labels)))
 
 
-MAX_LEN = 30  # 你可以根据数据调整长度
+# =============================
+# 2. 文本转索引
+# =============================
 
-def texts_to_indices(texts, vocab, max_len=MAX_LEN):
-    index_texts = []
-    for text in texts:
-        words = jieba.lcut(text)
-        ids = [vocab.get(w, vocab["<UNK>"]) for w in words]
-        if len(ids) < max_len:
-            ids += [vocab["<PAD>"]] * (max_len - len(ids))
-        else:
-            ids = ids[:max_len]
-        index_texts.append(ids)
-    return index_texts
-
+# 将原始文本转换为固定长度的整数序列，作为模型输入
 train_indices = texts_to_indices(train_texts, vocab)
 val_indices = texts_to_indices(val_texts, vocab)
 test_indices = texts_to_indices(test_texts, vocab)
 
+# 将标签字符串转换为整数索引
 train_label_indices = [label2idx[label] for label in train_labels]
 val_label_indices = [label2idx[label] for label in val_labels]
 test_label_indices = [label2idx[label] for label in test_labels]
 
 
-
-
 # =============================
-# 2 创建 Dataset
+# 3. 构建 Dataset 和 DataLoader
 # =============================
 
 class TextDataset(Dataset):
+    """
+    自定义 PyTorch 数据集
+
+    PyTorch 训练需要通过 Dataset + DataLoader 来组织数据：
+      - Dataset:    定义如何获取单条数据
+      - DataLoader: 自动把数据打包成小批次（batch），支持打乱和多线程加载
+    """
     def __init__(self, texts, labels):
         self.texts = texts
         self.labels = labels
@@ -99,19 +74,34 @@ class TextDataset(Dataset):
         return len(self.texts)
 
     def __getitem__(self, idx):
-        return torch.tensor(self.texts[idx], dtype=torch.long), torch.tensor(self.labels[idx], dtype=torch.long)
+        return (
+            torch.tensor(self.texts[idx], dtype=torch.long),
+            torch.tensor(self.labels[idx], dtype=torch.long),
+        )
+
 
 train_dataset = TextDataset(train_indices, train_label_indices)
 val_dataset = TextDataset(val_indices, val_label_indices)
 test_dataset = TextDataset(test_indices, test_label_indices)
 
-train_loader = DataLoader(train_dataset, batch_size=16, shuffle=True)
-val_loader = DataLoader(val_dataset, batch_size=16, shuffle=False)
-test_loader = DataLoader(test_dataset, batch_size=16, shuffle=False)
+# shuffle=True: 每轮训练开始前打乱数据顺序，有助于模型学习更稳定
+train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False)
+test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False)
 
 
+# =============================
+# 4. 评估函数
+# =============================
 
 def evaluate(model, data_loader, device):
+    """
+    在指定数据集上计算模型准确率
+
+    注意：
+      - model.eval()  关闭 Dropout，确保评估结果稳定
+      - torch.no_grad() 不计算梯度，节省显存
+    """
     model.eval()
     correct = 0
     total = 0
@@ -127,75 +117,51 @@ def evaluate(model, data_loader, device):
 
 
 # =============================
-# 3 创建模型
+# 5. 训练模型
 # =============================
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-model = TextCNN(len(vocab), 128, len(label_set)).to(device)
-criterion = torch.nn.CrossEntropyLoss()
-optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
 
-num_epochs = 50
-for epoch in range(num_epochs):
-    model.train()
+# 自动选择设备：有 GPU 用 GPU，没有就用 CPU
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"使用设备: {device}")
+
+# 初始化模型
+model = TextCNN(len(vocab), EMBED_DIM, len(label_set), dropout=DROPOUT).to(device)
+
+# 损失函数：多分类交叉熵，衡量预测概率分布与真实标签的差距
+criterion = torch.nn.CrossEntropyLoss()
+
+# 优化器：Adam，自适应学习率优化器，比 SGD 更容易收敛
+optimizer = torch.optim.Adam(model.parameters(), lr=LEARNING_RATE)
+
+# 记录最佳验证准确率，只保存表现最好的模型
+best_val_acc = 0.0
+
+for epoch in range(NUM_EPOCHS):
+    # --- 训练阶段 ---
+    model.train()   # 切换到训练模式（启用 Dropout）
     total_loss = 0
+
     for batch_texts, batch_labels in train_loader:
         batch_texts = batch_texts.to(device)
         batch_labels = batch_labels.to(device)
 
-        optimizer.zero_grad()
-        outputs = model(batch_texts)
-        loss = criterion(outputs, batch_labels)
-        loss.backward()
-        optimizer.step()
+        optimizer.zero_grad()                    # 清空上一步的梯度
+        outputs = model(batch_texts)             # 前向传播：输入 → 预测
+        loss = criterion(outputs, batch_labels)  # 计算预测与真实标签的差距
+        loss.backward()                          # 反向传播：计算每个参数的梯度
+        optimizer.step()                         # 根据梯度更新模型参数
 
         total_loss += loss.item()
 
+    # --- 验证阶段 ---
     val_acc = evaluate(model, val_loader, device)
-    print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(train_loader):.4f}, Val Acc: {val_acc:.4f}")
+    avg_loss = total_loss / len(train_loader)
+    print(f"Epoch [{epoch + 1}/{NUM_EPOCHS}], Loss: {avg_loss:.4f}, Val Acc: {val_acc:.4f}")
 
+    # 保存验证集上表现最好的模型（防止过拟合导致后期模型反而变差）
+    if val_acc > best_val_acc:
+        best_val_acc = val_acc
+        torch.save(model.state_dict(), MODEL_PATH)
+        print(f"  → 最优模型已保存 (Val Acc: {val_acc:.4f})")
 
-
-# vocab_size = len(vocab)
-# embed_dim = 128
-# num_classes = len(label_set)
-
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# mozel = TextCNN(vocab_size, embed_dim, num_classes).to(device)
-
-# # =============================
-# # 4 定义损失函数和优化器
-# # =============================
-
-# criterion = nn.CrossEntropyLoss()   # 交叉熵损失
-# optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
-# =============================
-# 5 训练模型
-# =============================
-
-# num_epochs = 15
-
-# for epoch in range(num_epochs):
-#     model.train()
-#     total_loss = 0
-#     for batch_texts, batch_labels in dataloader:
-#         batch_texts = batch_texts.to(device)
-#         batch_labels = batch_labels.to(device)
-
-#         optimizer.zero_grad()           # 清空梯度
-#         outputs = model(batch_texts)    # 前向传播
-#         loss = criterion(outputs, batch_labels)  # 计算损失
-#         loss.backward()                 # 反向传播
-#         optimizer.step()                # 更新参数
-
-#         total_loss += loss.item()
-
-#     print(f"Epoch [{epoch+1}/{num_epochs}], Loss: {total_loss/len(dataloader):.4f}")
-
-# =============================
-# 6 保存模型
-# =============================
-
-torch.save(model.state_dict(), "data/textcnn_model.pth")
-print("模型训练完成并保存！")
+print(f"\n训练完成！最佳验证准确率: {best_val_acc:.4f}")
