@@ -3,41 +3,104 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>TextCNN 智能分类台</title>
+  <title>错题管理 MVP 控制台</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/web/style.css" />
 </head>
 <body>
-  <main class="panel">
-    <h1>TextCNN 智能分类台</h1>
-    <p class="sub">升级为版本化 API 的联调台。默认请求 <strong>/api/v1/predict</strong>，也可在下方输入框改成你自己的后端地址。</p>
+  <main class="shell">
+    <header class="hero">
+      <h1>错题管理 MVP 控制台</h1>
+      <p>录入页：先分类再保存；列表页：筛选、分页、状态变更；看板页：学科分布。默认账号 <strong>demo_user</strong> / 管理员 <strong>admin_user</strong>。</p>
+    </header>
 
-    <section class="form">
-      <input id="apiBase" type="text" placeholder="API Base（留空默认当前站点 /api/v1，例如 http://127.0.0.1:8000/api/v1）" />
-      <textarea id="inputText" placeholder="示例：简述进程与线程的区别"></textarea>
-      <div class="actions">
-        <button class="primary" id="predictBtn">开始分类</button>
-        <button class="ghost" id="sampleBtn" type="button">填入示例</button>
+    <section class="auth-card">
+      <div class="row compact">
+        <label for="apiBase">API Base</label>
+        <input id="apiBase" type="text" placeholder="留空默认当前站点 /api/v1" />
+      </div>
+      <div class="row compact">
+        <label for="username">登录用户</label>
+        <select id="username">
+          <option value="demo_user">demo_user</option>
+          <option value="admin_user">admin_user</option>
+        </select>
+      </div>
+      <button id="loginBtn" class="primary" type="button">登录并获取 Token</button>
+      <div id="authStatus" class="hint">尚未登录</div>
+    </section>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="entry" type="button">录入页</button>
+      <button class="tab" data-tab="list" type="button">列表页</button>
+      <button class="tab" data-tab="board" type="button">看板页</button>
+    </nav>
+
+    <section id="tab-entry" class="panel active">
+      <h2>录入页</h2>
+      <textarea id="entryText" placeholder="输入题干文本，例如：简述进程与线程的区别"></textarea>
+      <div class="row">
+        <button id="classifyBtn" class="primary" type="button">1) AI 分类</button>
+        <button id="saveBtn" class="accent" type="button">2) 保存题目</button>
+      </div>
+      <div class="row">
+        <label for="entryAiLabel">AI 类别</label>
+        <input id="entryAiLabel" type="text" readonly />
+        <label for="entryConfidence">置信度</label>
+        <input id="entryConfidence" type="text" readonly />
+      </div>
+      <div class="row">
+        <label for="entryFinalLabel">最终类别(可改)</label>
+        <select id="entryFinalLabel"></select>
+      </div>
+      <textarea id="entryAnalysis" placeholder="解析(可选)"></textarea>
+      <div id="entryResult" class="result">等待操作...</div>
+    </section>
+
+    <section id="tab-list" class="panel">
+      <h2>列表页</h2>
+      <div class="row wrap">
+        <label for="filterLabel">学科</label>
+        <select id="filterLabel"><option value="">全部</option></select>
+        <label for="filterStatus">状态</label>
+        <select id="filterStatus">
+          <option value="">全部</option>
+          <option value="unreviewed">unreviewed</option>
+          <option value="reviewed">reviewed</option>
+          <option value="mastered">mastered</option>
+          <option value="careless">careless</option>
+        </select>
+        <label for="filterKeyword">关键词</label>
+        <input id="filterKeyword" type="text" placeholder="题干关键词" />
+        <button id="searchBtn" class="primary" type="button">查询</button>
+      </div>
+      <div id="listMeta" class="hint">-</div>
+      <table>
+        <thead>
+          <tr>
+            <th>题干</th>
+            <th>最终类</th>
+            <th>状态</th>
+            <th>更新时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody id="questionTbody"></tbody>
+      </table>
+      <div class="row">
+        <button id="prevPageBtn" class="ghost" type="button">上一页</button>
+        <button id="nextPageBtn" class="ghost" type="button">下一页</button>
       </div>
     </section>
 
-    <section class="grid">
-      <div class="result" id="resultBox">等待输入...</div>
-      <div class="history">
-        <h3>最近预测记录</h3>
-        <ol id="historyList"></ol>
-      </div>
+    <section id="tab-board" class="panel">
+      <h2>看板页</h2>
+      <button id="refreshBoardBtn" class="primary" type="button">刷新分布</button>
+      <div id="boardTotal" class="hint">总题数：0</div>
+      <div id="boardChart" class="bars"></div>
     </section>
-
-    <div class="conf-bar"><span id="confidenceBar"></span></div>
-
-    <div class="meta">
-      <span class="chip">默认接口: /api/v1/predict</span>
-      <span class="chip">方法: POST</span>
-      <span class="chip">输入: JSON{text}</span>
-    </div>
   </main>
   <script src="/web/app.js"></script>
 </body>
