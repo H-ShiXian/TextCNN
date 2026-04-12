@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>TextCNN 智能分类台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/web/style.css" />
+</head>
+<body>
+  <main class="panel">
+    <h1>TextCNN 智能分类台</h1>
+    <p class="sub">升级为版本化 API 的联调台。默认请求 <strong>/api/v1/predict</strong>，也可在下方输入框改成你自己的后端地址。</p>
+
+    <section class="form">
+      <input id="apiBase" type="text" placeholder="API Base（留空默认当前站点 /api/v1，例如 http://127.0.0.1:8000/api/v1）" />
+      <textarea id="inputText" placeholder="示例：简述进程与线程的区别"></textarea>
+      <div class="actions">
+        <button class="primary" id="predictBtn">开始分类</button>
+        <button class="ghost" id="sampleBtn" type="button">填入示例</button>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="result" id="resultBox">等待输入...</div>
+      <div class="history">
+        <h3>最近预测记录</h3>
+        <ol id="historyList"></ol>
+      </div>
+    </section>
+
+    <div class="conf-bar"><span id="confidenceBar"></span></div>
+
+    <div class="meta">
+      <span class="chip">默认接口: /api/v1/predict</span>
+      <span class="chip">方法: POST</span>
+      <span class="chip">输入: JSON{text}</span>
+    </div>
+  </main>
+  <script src="/web/app.js"></script>
+</body>
+</html>

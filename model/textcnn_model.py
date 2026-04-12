@@ -45,6 +45,11 @@ class TextCNN(nn.Module):
             for k in [2, 3, 4]
         ])
 
+        self.bns = nn.ModuleList([
+            nn.BatchNorm1d(100)
+            for _ in [2, 3, 4]
+        ])
+
         # ---- Dropout 层 ----
         # 训练时随机将一部分神经元输出置零，防止模型过度依赖某些特征（过拟合）
         # 测试时自动关闭，不影响预测
@@ -72,11 +77,28 @@ class TextCNN(nn.Module):
 
         # 3. 每种卷积核分别处理：卷积 → 激活 → 池化
         conv_results = []
-        for conv in self.convs:
-            c = F.relu(conv(x))         # 卷积 + ReLU → (batch_size, 100, new_len, 1)
-            c = c.squeeze(3)            # 去掉最后一维 → (batch_size, 100, new_len)
-            p = F.max_pool1d(c, c.size(2))  # 最大池化 → (batch_size, 100, 1)
-            p = p.squeeze(2)            # 去掉最后一维 → (batch_size, 100)
+        # for conv ,bn in zip(self.convs,self.bns):
+        #     c = F.relu(conv(x))         # 卷积 + ReLU → (batch_size, 100, new_len, 1)
+        #     c = c.squeeze(3)            # 去掉最后一维 → (batch_size, 100, new_len)
+        #     c = bn(c) 
+        #     p = F.max_pool1d(c, c.size(2))  # 最大池化 → (batch_size, 100, 1)
+        #     p = p.squeeze(2)            # 去掉最后一维 → (batch_size, 100)
+        #     conv_results.append(p)
+
+        for conv, bn in zip(self.convs, self.bns):
+
+            c = conv(x)          # Conv
+
+            c = c.squeeze(3)     # (batch, 100, new_len)
+
+            c = bn(c)            # BN  ← 这里
+
+            c = F.relu(c)        # ReLU
+
+            p = F.max_pool1d(c, c.size(2))
+
+            p = p.squeeze(2)
+
             conv_results.append(p)
 
         # 4. 拼接三种卷积核的结果
