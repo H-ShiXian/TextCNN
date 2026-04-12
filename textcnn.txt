@@ -1,0 +1,65 @@
+学习路线（按优先级排序）
+第一层：必须掌握（老师几乎一定会问）
+1. TextCNN 模型原理
+
+论文来源：Kim 2014, "Convolutional Neural Networks for Sentence Classification"
+核心思想：用不同大小的卷积核（你的项目用了 2/3/4）捕捉不同长度的 n-gram 特征
+你要能画出模型结构图并讲清楚每一层的作用：
+Embedding → 把词索引映射为 128 维向量
+Conv2d × 3 → 三种卷积核分别捕捉 bigram/trigram/4-gram
+MaxPooling → 每个卷积核取最显著的特征
+Dropout(0.5) → 防止过拟合
+FC → 全连接层输出 5 类
+2. CNN 为什么能用于 NLP？
+
+与图像 CNN 的区别：NLP 里卷积核宽度 = embedding 维度，只在时间/序列维度上滑动
+本质上是在检测局部特征模式（n-gram）
+3. 关键超参数的选择理由
+
+为什么 MAX_LEN=30？（题目长度适中，truncate 不会丢失太多信息）
+为什么 EMBED_DIM=128？（太小表达力不足，太大容易过拟合且数据量不大）
+为什么 Dropout=0.5？（经典设置，Hinton 推荐值）
+为什么用 Adam 优化器？（自适应学习率，收敛快）
+第二层：大概率会问
+4. 数据处理流程
+
+jieba 分词 → 构建词表 → 文本转索引 → padding/truncating
+词表只用训练集构建（防止数据泄漏）
+<PAD> 和 <UNK> 两个特殊 token 的作用
+5. 训练技巧
+
+为什么要分 train/val/test 三个集合？（训练/调参/最终评估）
+Early stopping / 保存最优模型的意义
+model.eval() 和 torch.no_grad() 各自的作用
+6. 评估指标
+
+准确率 90% 意味着什么？有什么局限？
+如果类别不均衡，应该用什么指标？（Precision, Recall, F1）
+第三层：加分项（展示深度）
+7. 与其他模型的对比
+
+TextCNN vs RNN/LSTM：CNN 并行效率高，擅长捕捉局部特征；RNN 擅长长距离依赖
+TextCNN vs Transformer/BERT：BERT 效果更好但需要更多算力和数据
+为什么你选了 TextCNN？（数据量小、任务简单、训练快）
+8. 可能的改进方向
+
+使用预训练词向量（Word2Vec / GloVe）
+使用预训练模型（BERT）做 fine-tuning
+数据增强（同义词替换、回译等）
+引入 Attention 机制
+学习建议
+先通读代码，按这个顺序：config.py → vocab_built.py → model/textcnn_model.py → train.py → evaluate_test.py，
+确保每一行都能看懂
+
+手动跑一遍流程，加 print 看中间变量的 shape 变化，比如：
+
+embedding 输出 shape：(batch, 30, 128)
+conv 输出 shape：(batch, 100, 29, 1) / (batch, 100, 28, 1) / (batch, 100, 27, 1)
+pooling 后：(batch, 100) × 3 → concat → (batch, 300)
+准备一份模型结构手绘图，面试时能边画边讲
+
+准备 2-3 个"坑"的回答，比如老师可能反问：
+
+"你的数据量只有 2000 多条，够吗？" → 因为任务简单、类别少、TextCNN 参数量不大
+"90% 准确率你满意吗？" → 分析错误样本，可能是跨学科的题目本身就有歧义
+"为什么不用 BERT？" → 数据量小，BERT 容易过拟合，TextCNN 足够且轻量
