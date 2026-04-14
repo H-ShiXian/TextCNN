@@ -8,11 +8,14 @@
 
 from pathlib import Path
 from typing import Any
+import hashlib
+import hmac
 import json
+import os
 import sqlite3
 import threading
 import uuid
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
 from fastapi.exceptions import RequestValidationError
@@ -62,6 +65,12 @@ class FeedbackRequest(BaseModel):
 
 class LoginRequest(BaseModel):
     username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=6)
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=64)
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class UpdateQuestionRequest(BaseModel):
@@ -144,14 +153,6 @@ ROLE_SET = {"student", "admin"}
 MASTERY_SET = {"unreviewed", "reviewed", "mastered", "careless"}
 SOURCE_TYPE_SET = {"manual", "import", "ocr"}
 WRITE_STATUS_SET = {"pending", "written", "failed"}
-AUTH_TOKEN_USER_MAP = {
-    "demo-token": "demo_user",
-    "admin-token": "admin_user",
-}
-LOGIN_USER_TOKEN_MAP = {
-    "demo_user": "demo-token",
-    "admin_user": "admin-token",
-}
 CORPUS_FLUSH_LOCK = threading.Lock()
 CORPUS_FLUSH_STATE: dict[str, Any] = {
     "running": False,
@@ -183,6 +184,37 @@ def _connect_db() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
+
+
+def _hash_password(password: str, salt: str | None = None) -> str:
+    if salt is None:
+        salt = os.urandom(16).hex()
+    iterations = 120000
+    pwd_hash = hashlib.pbkdf2_hmac(
+        "sha256",
+        password.encode("utf-8"),
+        bytes.fromhex(salt),
+        iterations,
+    ).hex()
+    return f"pbkdf2_sha256${iterations}${salt}${pwd_hash}"
+
+
+def _verify_password(password: str, encoded: str | None) -> bool:
+    if not encoded:
+        return False
+    try:
+        algo, iter_s, salt, expected = encoded.split("$", 3)
+        if algo != "pbkdf2_sha256":
+            return False
+        calculated = hashlib.pbkdf2_hmac(
+            "sha256",
+            password.encode("utf-8"),
+            bytes.fromhex(salt),
+            int(iter_s),
+        ).hex()
+        return hmac.compare_digest(calculated, expected)
+    except Exception:
+        return False
 
 
 def init_db() -> None:
@@ -263,6 +295,17 @@ def init_db() -> None:
             );
             CREATE INDEX IF NOT EXISTS idx_model_versions_active ON model_versions(is_active);
 
+            CREATE TABLE IF NOT EXISTS user_sessions (
+                token TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                created_at DATETIME NOT NULL,
+                expired_at DATETIME NULL,
+                is_revoked INTEGER NOT NULL DEFAULT 0,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_sessions_user ON user_sessions(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_sessions_revoked ON user_sessions(is_revoked);
+
             CREATE TABLE IF NOT EXISTS question_review_logs (
                 id TEXT PRIMARY KEY,
                 question_id TEXT NOT NULL,
@@ -299,6 +342,10 @@ def init_db() -> None:
             """,
             ("admin_user", "admin_user", "admin", now, now),
         )
+        demo_hash = _hash_password("demo123456")
+        admin_hash = _hash_password("admin123456")
+        conn.execute("UPDATE users SET password_hash=?, updated_at=? WHERE id='demo_user' AND (password_hash IS NULL OR password_hash='')", (demo_hash, now))
+        conn.execute("UPDATE users SET password_hash=?, updated_at=? WHERE id='admin_user' AND (password_hash IS NULL OR password_hash='')", (admin_hash, now))
         conn.execute(
             """
             INSERT INTO model_versions(id, version_name, model_path, notes, is_active, is_deleted, created_at, updated_at)
@@ -378,15 +425,23 @@ def _parse_bearer_token(authorization: str | None) -> str:
 
 def get_current_user(authorization: str | None = Header(default=None)) -> dict[str, str]:
     token = _parse_bearer_token(authorization)
-    user_id = AUTH_TOKEN_USER_MAP.get(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="token 非法或已过期")
 
     conn = _connect_db()
     try:
-        user = conn.execute("SELECT id, username, role FROM users WHERE id=?", (user_id,)).fetchone()
+        user = conn.execute(
+            """
+            SELECT u.id, u.username, u.role
+            FROM user_sessions s
+            JOIN users u ON u.id = s.user_id
+            WHERE s.token=?
+              AND s.is_revoked=0
+              AND (s.expired_at IS NULL OR datetime(s.expired_at) > datetime('now'))
+            LIMIT 1
+            """,
+            (token,),
+        ).fetchone()
         if user is None:
-            raise HTTPException(status_code=401, detail="用户不存在")
+            raise HTTPException(status_code=401, detail="token 非法或已过期")
         return {"id": user["id"], "username": user["username"], "role": user["role"]}
     finally:
         conn.close()
@@ -499,6 +554,11 @@ def index_page():
     return FileResponse(web_dir / "index.html")
 
 
+@app.get("/login")
+def login_page():
+    return FileResponse(web_dir / "login.html")
+
+
 @app.get(
     "/health",
     response_model=ApiResponse,
@@ -574,15 +634,27 @@ def list_labels():
 
 @api_router.post("/auth/login", response_model=ApiResponse)
 def login(payload: LoginRequest):
-    token = LOGIN_USER_TOKEN_MAP.get(payload.username.strip())
-    if token is None:
-        raise HTTPException(status_code=401, detail="用户名不存在")
+    username = payload.username.strip()
 
     conn = _connect_db()
     try:
-        user = conn.execute("SELECT id, role FROM users WHERE id=?", (payload.username.strip(),)).fetchone()
+        user = conn.execute(
+            "SELECT id, username, role, password_hash FROM users WHERE username=?",
+            (username,),
+        ).fetchone()
         if user is None:
-            raise HTTPException(status_code=401, detail="用户不存在")
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+        if not _verify_password(payload.password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="用户名或密码错误")
+
+        now = _utc_now()
+        token = _new_id("tk")
+        expired_at = (datetime.utcnow() + timedelta(days=30)).strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            "INSERT INTO user_sessions(token, user_id, created_at, expired_at, is_revoked) VALUES (?, ?, ?, ?, 0)",
+            (token, user["id"], now, expired_at),
+        )
+        conn.commit()
     finally:
         conn.close()
 
@@ -590,10 +662,38 @@ def login(payload: LoginRequest):
         {
             "token_type": "Bearer",
             "access_token": token,
-            "user": {"id": payload.username.strip(), "role": user["role"]},
+            "expires_in_days": 30,
+            "user": {"id": user["id"], "username": user["username"], "role": user["role"]},
         },
         "登录成功",
     )
+
+
+@api_router.post("/auth/register", response_model=ApiResponse)
+def register(payload: RegisterRequest):
+    username = payload.username.strip()
+    if not username.replace("_", "").isalnum():
+        raise HTTPException(status_code=400, detail="用户名仅支持字母、数字、下划线")
+
+    now = _utc_now()
+    user_id = username
+    password_hash = _hash_password(payload.password)
+
+    conn = _connect_db()
+    try:
+        exists = conn.execute("SELECT id FROM users WHERE username=?", (username,)).fetchone()
+        if exists is not None:
+            raise HTTPException(status_code=400, detail="用户名已存在")
+
+        conn.execute(
+            "INSERT INTO users(id, username, password_hash, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (user_id, username, password_hash, "student", now, now),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+    return ok({"id": user_id, "username": username, "role": "student"}, "注册成功")
 
 
 @api_router.post(
@@ -993,6 +1093,138 @@ def dashboard_subject_distribution(current_user: dict[str, str] = Depends(get_cu
     counts = [row["cnt"] for row in rows]
     total = sum(counts)
     return ok({"labels": labels, "counts": counts, "total": total})
+
+
+@api_router.get("/dashboard/mastery-overview", response_model=ApiResponse)
+def dashboard_mastery_overview(current_user: dict[str, str] = Depends(get_current_user)):
+    conn = _connect_db()
+    try:
+        rows = conn.execute(
+            """
+            SELECT mastery_status, COUNT(1) AS cnt
+            FROM questions
+            WHERE is_deleted=0 AND user_id=?
+            GROUP BY mastery_status
+            """,
+            (current_user["id"],),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    status_count = {status: 0 for status in MASTERY_SET}
+    for row in rows:
+        status_count[row["mastery_status"]] = row["cnt"]
+
+    total = sum(status_count.values())
+    mastered = status_count.get("mastered", 0)
+    reviewed = status_count.get("reviewed", 0)
+    mastery_rate = (mastered / total) if total else 0.0
+    review_rate = ((mastered + reviewed) / total) if total else 0.0
+    return ok(
+        {
+            "total": total,
+            "status_count": status_count,
+            "mastery_rate": round(mastery_rate, 4),
+            "review_rate": round(review_rate, 4),
+        }
+    )
+
+
+@api_router.get("/dashboard/study-trend", response_model=ApiResponse)
+def dashboard_study_trend(
+    days: int = Query(default=7, ge=3, le=60),
+    current_user: dict[str, str] = Depends(get_current_user),
+):
+    conn = _connect_db()
+    try:
+        created_rows = conn.execute(
+            """
+            SELECT strftime('%Y-%m-%d', created_at) AS d, COUNT(1) AS cnt
+            FROM questions
+            WHERE is_deleted=0 AND user_id=?
+              AND datetime(created_at) >= datetime('now', ?)
+            GROUP BY d
+            ORDER BY d ASC
+            """,
+            (current_user["id"], f"-{days - 1} days"),
+        ).fetchall()
+
+        review_rows = conn.execute(
+            """
+            SELECT strftime('%Y-%m-%d', created_at) AS d, COUNT(1) AS cnt
+            FROM question_review_logs
+            WHERE user_id=?
+              AND datetime(created_at) >= datetime('now', ?)
+            GROUP BY d
+            ORDER BY d ASC
+            """,
+            (current_user["id"], f"-{days - 1} days"),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    created_map = {row["d"]: row["cnt"] for row in created_rows}
+    review_map = {row["d"]: row["cnt"] for row in review_rows}
+
+    labels: list[str] = []
+    created_counts: list[int] = []
+    reviewed_counts: list[int] = []
+    today = datetime.utcnow().date()
+    for i in range(days - 1, -1, -1):
+        day = today - timedelta(days=i)
+        key = day.strftime("%Y-%m-%d")
+        labels.append(key)
+        created_counts.append(int(created_map.get(key, 0)))
+        reviewed_counts.append(int(review_map.get(key, 0)))
+
+    return ok(
+        {
+            "labels": labels,
+            "created_counts": created_counts,
+            "reviewed_counts": reviewed_counts,
+            "days": days,
+        }
+    )
+
+
+@api_router.get("/dashboard/weak-topics", response_model=ApiResponse)
+def dashboard_weak_topics(current_user: dict[str, str] = Depends(get_current_user)):
+    conn = _connect_db()
+    try:
+        rows = conn.execute(
+            """
+            SELECT
+                final_label,
+                COUNT(1) AS total_cnt,
+                SUM(CASE WHEN mastery_status='mastered' THEN 1 ELSE 0 END) AS mastered_cnt,
+                SUM(CASE WHEN mastery_status='unreviewed' OR mastery_status='careless' THEN 1 ELSE 0 END) AS weak_cnt
+            FROM questions
+            WHERE is_deleted=0 AND user_id=?
+            GROUP BY final_label
+            ORDER BY weak_cnt DESC, total_cnt DESC
+            """,
+            (current_user["id"],),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    items = []
+    for row in rows:
+        total_cnt = int(row["total_cnt"] or 0)
+        weak_cnt = int(row["weak_cnt"] or 0)
+        mastered_cnt = int(row["mastered_cnt"] or 0)
+        weak_rate = (weak_cnt / total_cnt) if total_cnt else 0.0
+        items.append(
+            {
+                "label": row["final_label"],
+                "total_cnt": total_cnt,
+                "weak_cnt": weak_cnt,
+                "mastered_cnt": mastered_cnt,
+                "weak_rate": round(weak_rate, 4),
+            }
+        )
+
+    return ok({"items": items})
 
 
 @api_router.post("/admin/corpus/flush", response_model=ApiResponse)

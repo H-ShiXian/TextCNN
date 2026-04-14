@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>登录 - 学习分析系统</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/web/style.css" />
+</head>
+<body>
+  <main class="login-shell">
+    <section class="login-card">
+      <div class="login-header">
+        <div class="logo-circle">
+          <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+        </div>
+        <h1>学习分析系统</h1>
+        <p class="login-sub">登录您的智能错题空间</p>
+      </div>
+
+      <form id="loginForm" class="login-form">
+        <div class="input-group">
+          <label for="username">用户名</label>
+          <input id="username" type="text" placeholder="请输入用户名" autocomplete="username" />
+        </div>
+        <div class="input-group">
+          <label for="password">密码</label>
+          <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+        </div>
+
+        <div class="auth-actions">
+          <button id="loginBtn" class="primary btn-large" type="button">登 录</button>
+          <button id="registerBtn" class="ghost btn-large" type="button">注 册</button>
+        </div>
+      </form>
+
+      <div id="authStatus" class="hint auth-footer">
+      </div>
+    </section>
+  </main>
+  <script src="/web/login.js"></script>
+</body>
+</html>

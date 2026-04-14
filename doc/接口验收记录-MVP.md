@@ -23,7 +23,7 @@
 POST /api/v1/auth/login
 Content-Type: application/json
 
-{"username":"demo_user"}
+{"username":"demo_user","password":"demo123456"}
 ```
 
 响应样例：
@@ -37,6 +37,27 @@ Content-Type: application/json
     "access_token": "demo-token",
     "user": {"id": "demo_user", "role": "student"}
   }
+}
+```
+
+### 2.2 注册
+
+请求：
+
+```http
+POST /api/v1/auth/register
+Content-Type: application/json
+
+{"username":"alice_01","password":"alice123456"}
+```
+
+响应样例：
+
+```json
+{
+  "code": 0,
+  "message": "注册成功",
+  "data": {"id": "alice_01", "username": "alice_01", "role": "student"}
 }
 ```
 
@@ -215,8 +236,57 @@ Content-Type: application/json
 
 - 录入页：已实现 classify -> 可改类 -> 保存。
 - 列表页：已实现筛选 + 分页 + 状态修改 + 删除。
-- 看板页：已实现学科分布图。
+- 看板页：已实现学科分布图 + 掌握度概览 + 7天学习趋势 + 薄弱学科排行。
 - 用户流程：登录后可完成端到端闭环，无断点。
+
+## 6.1 学习分析接口（新增）
+
+### 学习掌握概览
+
+请求：
+
+```http
+GET /api/v1/dashboard/mastery-overview
+Authorization: Bearer demo-token
+```
+
+响应样例：
+
+```json
+{
+  "code": 0,
+  "message": "ok",
+  "data": {
+    "total": 8,
+    "status_count": {
+      "reviewed": 5,
+      "unreviewed": 3,
+      "mastered": 0,
+      "careless": 0
+    },
+    "mastery_rate": 0.0,
+    "review_rate": 0.625
+  }
+}
+```
+
+### 近7天学习趋势
+
+请求：
+
+```http
+GET /api/v1/dashboard/study-trend?days=7
+Authorization: Bearer demo-token
+```
+
+### 薄弱学科排行
+
+请求：
+
+```http
+GET /api/v1/dashboard/weak-topics
+Authorization: Bearer demo-token
+```
 
 ## 7. 截图留存说明
 

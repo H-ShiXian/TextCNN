@@ -29,7 +29,7 @@ function Get-AuthHeader {
 }
 
 Write-Output '[1/12] login demo'
-$loginBody = @{ username = 'demo_user' } | ConvertTo-Json
+$loginBody = @{ username = 'demo_user'; password = 'demo123456' } | ConvertTo-Json
 $loginResp = Invoke-RestMethod -Method Post -Uri "$base/api/v1/auth/login" -ContentType 'application/json' -Body $loginBody
 Assert-CodeZero -Response $loginResp -Step 'login demo'
 $demoToken = $loginResp.data.access_token
@@ -93,7 +93,7 @@ $feedbackResp = Invoke-RestMethod -Method Post -Uri "$base/api/v1/ai/feedback" -
 Assert-CodeZero -Response $feedbackResp -Step 'feedback'
 
 Write-Output '[9/12] login admin + corpus flush'
-$adminLoginBody = @{ username = 'admin_user' } | ConvertTo-Json
+$adminLoginBody = @{ username = 'admin_user'; password = 'admin123456' } | ConvertTo-Json
 $adminLoginResp = Invoke-RestMethod -Method Post -Uri "$base/api/v1/auth/login" -ContentType 'application/json' -Body $adminLoginBody
 Assert-CodeZero -Response $adminLoginResp -Step 'login admin'
 $adminToken = $adminLoginResp.data.access_token

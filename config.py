@@ -19,6 +19,8 @@ TEST_PATH  = "data/test.txt"       # 测试集路径
 VOCAB_PATH = "data/vocab.json"     # 词表路径
 LABEL_PATH = "data/label.json"     # 标签映射路径
 MODEL_PATH = "data/textcnn_model.pth"  # 模型保存路径
+DB_PATH    = "data/app.db"             # 业务数据库路径
+MODEL_VERSION = "textcnn-v1"          # 当前推理模型版本
 
 
 # =============================
