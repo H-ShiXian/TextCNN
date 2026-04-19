@@ -25,6 +25,9 @@ DB_PATH    = "data/app.db"             # 业务数据库路径
 MODEL_VERSION = "textcnn-v1"          # 当前推理模型版本
 DEMO_PASSWORD = os.getenv("TEXTCNN_DEMO_PASSWORD", "demo123456")
 ADMIN_PASSWORD = os.getenv("TEXTCNN_ADMIN_PASSWORD", "admin123456")
+AI_API_URL = os.getenv("TEXTCNN_AI_API_URL", os.getenv("SILICONFLOW_API_URL", "https://api.siliconflow.cn/v1/chat/completions"))
+AI_API_KEY = os.getenv("TEXTCNN_AI_API_KEY", os.getenv("SILICONFLOW_API_KEY", ""))
+AI_API_MODEL = os.getenv("TEXTCNN_AI_API_MODEL", os.getenv("SILICONFLOW_API_MODEL", "Qwen/Qwen2.5-VL-72B-Instruct"))
 
 
 # =============================

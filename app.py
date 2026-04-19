@@ -8,6 +8,7 @@
 
 from pathlib import Path
 from typing import Any
+import base64
 import hashlib
 import hmac
 import json
@@ -15,6 +16,8 @@ import os
 import re
 import sqlite3
 import threading
+import urllib.error
+import urllib.request
 import uuid
 from datetime import datetime, timedelta
 
@@ -25,13 +28,17 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from config import ADMIN_PASSWORD, DB_PATH, DEMO_PASSWORD, MODEL_VERSION, TRAIN_PATH
+from config import ADMIN_PASSWORD, AI_API_KEY, AI_API_MODEL, AI_API_URL, DB_PATH, DEMO_PASSWORD, MODEL_VERSION, TRAIN_PATH
 from inference import TextClassifier
 
 
 class PredictRequest(BaseModel):
     text: str = Field(..., min_length=1, description="待分类文本")
     source_type: str = Field(default="manual")
+
+
+class ParseTextRequest(BaseModel):
+    text: str = Field(..., min_length=1, description="待解析题目文本")
 
 
 class PredictResponse(BaseModel):
@@ -526,6 +533,204 @@ def _ocr_extract_text(image_bytes: bytes) -> str:
     return "\n".join(lines).strip()
 
 
+def _build_local_ocr_analysis(ocr_text: str, label: str, confidence: float) -> str:
+    preview = ocr_text.strip().replace("\n", " ")[:160]
+    confidence_percent = (confidence or 0.0) * 100
+    return (
+        "参考解析：\n"
+        f"题干要点：{preview}\n"
+        f"学科判断：{label}（置信度 {confidence_percent:.2f}%）\n"
+        "请结合课程知识点核对最终答案。"
+    )
+
+
+def _strip_markdown_symbols(text: str) -> str:
+    if not text:
+        return ""
+
+    cleaned = text
+    cleaned = re.sub(r"```[\s\S]*?```", lambda m: m.group(0).replace("```", ""), cleaned)
+    cleaned = re.sub(r"`([^`]*)`", r"\1", cleaned)
+    cleaned = re.sub(r"^\s{0,3}#{1,6}\s*", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\*\*(.*?)\*\*", r"\1", cleaned)
+    cleaned = re.sub(r"__(.*?)__", r"\1", cleaned)
+    cleaned = re.sub(r"\*(.*?)\*", r"\1", cleaned)
+    cleaned = re.sub(r"_(.*?)_", r"\1", cleaned)
+    cleaned = re.sub(r"^\s*>\s?", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^\s*[-+*]\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"^\s*\d+\.\s+", "", cleaned, flags=re.MULTILINE)
+    cleaned = re.sub(r"\[([^\]]+)\]\(([^)]+)\)", r"\1", cleaned)
+    cleaned = re.sub(r"\n{3,}", "\n\n", cleaned)
+    return cleaned.strip()
+
+
+def _format_answer_analysis(text: str) -> str:
+    cleaned = _strip_markdown_symbols(text)
+    if not cleaned:
+        return ""
+
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    answer = ""
+    analysis = ""
+
+    answer_match = re.search(r"(?:^|\n)\s*答案\s*[：:]\s*(.+)", cleaned)
+    analysis_match = re.search(r"(?:^|\n)\s*解析\s*[：:]\s*([\s\S]+)$", cleaned)
+
+    if answer_match:
+        answer = answer_match.group(1).strip()
+    if analysis_match:
+        analysis = analysis_match.group(1).strip()
+
+    if not answer and lines:
+        answer = lines[0]
+    if not analysis:
+        if answer and len(lines) > 1:
+            analysis = "\n".join(lines[1:]).strip()
+        else:
+            analysis = cleaned
+
+    if not answer:
+        answer = "未能从题图中提取明确答案"
+    if not analysis:
+        analysis = "未能提取有效解析，请结合原题核对。"
+
+    return f"答案：{answer}\n\n解析：{analysis}"
+
+
+def _call_external_ai_parse(image_bytes: bytes, content_type: str | None, ocr_text: str) -> str | None:
+    api_key = (AI_API_KEY or "").strip()
+    model = (AI_API_MODEL or "Qwen/Qwen2.5-VL-72B-Instruct").strip()
+    if not api_key:
+        return None
+
+    api_url = (AI_API_URL or "").strip()
+    if not api_url:
+        api_url = "https://api.siliconflow.cn/v1/chat/completions"
+
+    mime = content_type if content_type and content_type.startswith("image/") else "image/png"
+    image_b64 = base64.b64encode(image_bytes).decode("ascii")
+
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是考研408智能助教。请严格按以下格式输出：\n答案：<一句话结论>\n\n解析：<分点或短段落解释>\n不要输出任何其他标题或前后缀。",
+            },
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "text",
+                        "text": (
+                            "请根据题目图片给出最终答案和简洁解析。"
+                            "若图片不清晰，请结合以下OCR文本进行判断：\n"
+                            f"{ocr_text}"
+                        ),
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{mime};base64,{image_b64}",
+                        },
+                    },
+                ],
+            },
+        ],
+        "temperature": 0.2,
+    }
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        api_url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"外部AI解析服务调用失败: {exc}") from exc
+
+    try:
+        data = json.loads(raw)
+        content = data["choices"][0]["message"]["content"]
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="外部AI解析服务返回格式异常") from exc
+
+    if isinstance(content, list):
+        text_items = [item.get("text", "") for item in content if isinstance(item, dict)]
+        merged = "\n".join([t.strip() for t in text_items if t and t.strip()]).strip()
+        formatted = _format_answer_analysis(merged)
+        return formatted or None
+
+    formatted = _format_answer_analysis(str(content).strip())
+    return formatted or None
+
+
+def _call_external_ai_parse_text(question_text: str) -> str | None:
+    api_key = (AI_API_KEY or "").strip()
+    model = (AI_API_MODEL or "Qwen/Qwen2.5-VL-72B-Instruct").strip()
+    if not api_key:
+        return None
+
+    api_url = (AI_API_URL or "").strip()
+    if not api_url:
+        api_url = "https://api.siliconflow.cn/v1/chat/completions"
+
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "system",
+                "content": "你是考研408智能助教。请严格按以下格式输出：\n答案：<一句话结论>\n\n解析：<分点或短段落解释>\n不要输出任何其他标题或前后缀。",
+            },
+            {
+                "role": "user",
+                "content": f"请根据以下题目文本给出最终答案和简洁解析：\n{question_text}",
+            },
+        ],
+        "temperature": 0.2,
+    }
+
+    body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(
+        api_url,
+        data=body,
+        method="POST",
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            raw = resp.read().decode("utf-8")
+    except urllib.error.URLError as exc:
+        raise HTTPException(status_code=502, detail=f"外部AI解析服务调用失败: {exc}") from exc
+
+    try:
+        data = json.loads(raw)
+        content = data["choices"][0]["message"]["content"]
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail="外部AI解析服务返回格式异常") from exc
+
+    if isinstance(content, list):
+        text_items = [item.get("text", "") for item in content if isinstance(item, dict)]
+        merged = "\n".join([t.strip() for t in text_items if t and t.strip()]).strip()
+        formatted = _format_answer_analysis(merged)
+        return formatted or None
+
+    formatted = _format_answer_analysis(str(content).strip())
+    return formatted or None
+
+
 def _parse_bearer_token(authorization: str | None) -> str:
     if not authorization:
         raise HTTPException(status_code=401, detail="缺少 Authorization 头")
@@ -865,6 +1070,64 @@ async def ocr_recognize(file: UploadFile = File(...), _: dict[str, str] = Depend
             "source_type": "ocr",
         },
         "图片识别成功",
+    )
+
+
+@api_router.post("/ai/parse-image", response_model=ApiResponse)
+async def parse_image_by_ai(file: UploadFile = File(...), _: dict[str, str] = Depends(get_current_user)):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="仅支持图片文件")
+
+    image_bytes = await file.read()
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 10MB")
+
+    text = _ocr_extract_text(image_bytes)
+    if not text:
+        raise HTTPException(status_code=400, detail="未识别到可用文本")
+
+    if not (AI_API_KEY or "").strip():
+        raise HTTPException(status_code=503, detail="未配置外部解析API密钥，请先设置 SILICONFLOW_API_KEY")
+
+    pred = _predict_text(text, source_type="ocr")
+    external_analysis = _call_external_ai_parse(image_bytes, file.content_type, text)
+    if not external_analysis:
+        raise HTTPException(status_code=502, detail="外部解析API未返回有效内容")
+
+    return ok(
+        {
+            "analysis": external_analysis,
+            "ocr_text": text,
+            "label": pred["label"],
+            "confidence": pred["confidence"],
+            "provider": "external_ai",
+        },
+        "图片解析成功",
+    )
+
+
+@api_router.post("/ai/parse-text", response_model=ApiResponse)
+def parse_text_by_ai(payload: ParseTextRequest, _: dict[str, str] = Depends(get_current_user)):
+    text = payload.text.strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="题目文本不能为空")
+
+    if not (AI_API_KEY or "").strip():
+        raise HTTPException(status_code=503, detail="未配置外部解析API密钥，请先设置 SILICONFLOW_API_KEY")
+
+    pred = _predict_text(text, source_type="manual")
+    external_analysis = _call_external_ai_parse_text(text)
+    if not external_analysis:
+        raise HTTPException(status_code=502, detail="外部解析API未返回有效内容")
+
+    return ok(
+        {
+            "analysis": external_analysis,
+            "label": pred["label"],
+            "confidence": pred["confidence"],
+            "provider": "external_ai",
+        },
+        "文本解析成功",
     )
 
 

@@ -48,6 +48,7 @@ const saveBtn = document.getElementById("saveBtn");
 const entryAiLabel = document.getElementById("entryAiLabel");
 const entryConfidence = document.getElementById("entryConfidence");
 const entryFinalLabel = document.getElementById("entryFinalLabel");
+const parseBtn = document.getElementById("parseBtn");
 const entryAnalysis = document.getElementById("entryAnalysis");
 const entryResult = document.getElementById("entryResult");
 
@@ -288,6 +289,45 @@ async function recognizeByImage() {
   setEntryResult(`识别完成 · 来源 ${data.source_type || "ocr"}`, "ok");
 }
 
+async function parseImageToAnalysis() {
+  const file = ocrImageInput && ocrImageInput.files ? ocrImageInput.files[0] : null;
+  const text = entryText.value.trim();
+  let data = null;
+
+  setEntryResult("AI 解析中，请稍候...", "");
+
+  if (file) {
+    if (!file.type || !file.type.startsWith("image/")) {
+      setEntryResult("仅支持图片文件", "warn");
+      return;
+    }
+
+    const formData = new FormData();
+    formData.append("file", file);
+    data = await apiPostForm("/ai/parse-image", formData, true);
+  } else {
+    if (!text) {
+      setEntryResult("请先上传图片或输入题目文本", "warn");
+      return;
+    }
+    data = await apiPost("/ai/parse-text", { text }, true);
+  }
+
+  if (!entryText.value.trim() && data.ocr_text) {
+    entryText.value = data.ocr_text;
+    state.sourceType = "ocr";
+  }
+  if (data.label) {
+    entryAiLabel.value = formatLabel(data.label);
+    entryFinalLabel.value = data.label;
+  }
+  if (data.confidence !== undefined && data.confidence !== null) {
+    entryConfidence.value = `${(Number(data.confidence) * 100).toFixed(2)}%`;
+  }
+  entryAnalysis.value = data.analysis || "";
+  setEntryResult("解析完成", "ok");
+}
+
 entryText.addEventListener("input", () => {
   state.classified = null;
   entryAiLabel.value = "";
@@ -517,6 +557,19 @@ if (ocrBtn) {
       setEntryResult(`识别失败：${error.message}`, "warn");
     } finally {
       ocrBtn.disabled = false;
+    }
+  });
+}
+
+if (parseBtn) {
+  parseBtn.addEventListener("click", async () => {
+    parseBtn.disabled = true;
+    try {
+      await parseImageToAnalysis();
+    } catch (error) {
+      setEntryResult(`解析失败：${error.message}`, "warn");
+    } finally {
+      parseBtn.disabled = false;
     }
   });
 }

@@ -366,6 +366,10 @@ h2 {
   align-items: center;
 }
 
+#entryFinalLabel {
+  flex: 1;
+}
+
 .row.wrap {
   flex-wrap: wrap;
 }
@@ -402,6 +406,10 @@ select {
 textarea {
   min-height: 100px;
   resize: vertical;
+}
+
+#entryAnalysis {
+  min-height: 260px;
 }
 
 button {
