@@ -7,6 +7,8 @@
 """
 
 import jieba
+import json
+import os
 
 
 # =============================
@@ -21,6 +23,8 @@ LABEL_PATH = "data/label.json"     # 标签映射路径
 MODEL_PATH = "data/textcnn_model.pth"  # 模型保存路径
 DB_PATH    = "data/app.db"             # 业务数据库路径
 MODEL_VERSION = "textcnn-v1"          # 当前推理模型版本
+DEMO_PASSWORD = os.getenv("TEXTCNN_DEMO_PASSWORD", "demo123456")
+ADMIN_PASSWORD = os.getenv("TEXTCNN_ADMIN_PASSWORD", "admin123456")
 
 
 # =============================
@@ -93,3 +97,28 @@ def texts_to_indices(texts, vocab, max_len=MAX_LEN):
 
         index_texts.append(ids)
     return index_texts
+
+
+def load_vocab(path=VOCAB_PATH):
+    """加载词表文件。"""
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def load_labels(path=LABEL_PATH):
+    """加载标签映射文件。"""
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
+
+
+def preprocess_text(text, vocab, max_len=MAX_LEN):
+    """将单条文本转换为固定长度的索引序列。"""
+    words = jieba.lcut(text)
+    ids = [vocab.get(w, vocab["<UNK>"]) for w in words]
+
+    if len(ids) < max_len:
+        ids += [vocab["<PAD>"]] * (max_len - len(ids))
+    else:
+        ids = ids[:max_len]
+
+    return ids

@@ -385,6 +385,11 @@ button {
   font: inherit;
 }
 
+input[type="file"] {
+  flex: 1;
+  min-width: 220px;
+}
+
 input,
 textarea,
 select {
@@ -453,6 +458,27 @@ th {
   letter-spacing: 0.03em;
 }
 
+#tab-list table th:nth-child(2),
+#tab-list table td:nth-child(2),
+#tab-list table th:nth-child(4),
+#tab-list table td:nth-child(4),
+#tab-list table th:nth-child(5),
+#tab-list table td:nth-child(5) {
+  white-space: nowrap;
+}
+
+#tab-list table td:nth-child(4),
+#tab-list table td:nth-child(5) {
+  width: 1%;
+}
+
+.action-buttons {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
 .bars {
   display: grid;
   gap: 8px;
@@ -478,9 +504,14 @@ th {
 
 .bar-item {
   display: grid;
-  grid-template-columns: 180px 1fr 70px;
+  grid-template-columns: 180px 1fr max-content;
   gap: 10px;
   align-items: center;
+}
+
+.bar-item > span:last-child {
+  white-space: nowrap;
+  justify-self: end;
 }
 
 .bar-track {
@@ -494,6 +525,58 @@ th {
   height: 100%;
   border-radius: 999px;
   background: linear-gradient(90deg, #0f766e, #22c55e);
+}
+
+.pie-layout {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  gap: 16px;
+  align-items: center;
+}
+
+.pie-chart {
+  width: 220px;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  position: relative;
+  border: 1px solid rgba(15, 23, 42, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.55);
+}
+
+.pie-chart::after {
+  content: "";
+  position: absolute;
+  inset: 28%;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.pie-legend {
+  display: grid;
+  gap: 8px;
+}
+
+.pie-legend-item {
+  display: grid;
+  grid-template-columns: 12px 1fr max-content;
+  gap: 8px;
+  align-items: center;
+}
+
+.pie-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.pie-label,
+.pie-value {
+  white-space: nowrap;
+}
+
+.pie-value {
+  justify-self: end;
 }
 
 .trend-item {
@@ -537,6 +620,15 @@ th {
 @media (max-width: 860px) {
   .tabs {
     grid-template-columns: 1fr;
+  }
+
+  .pie-layout {
+    grid-template-columns: 1fr;
+    justify-items: center;
+  }
+
+  .pie-legend {
+    width: 100%;
   }
 
   .bar-item {

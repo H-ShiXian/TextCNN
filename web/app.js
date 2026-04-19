@@ -10,6 +10,26 @@ function formatLabel(label) {
   return LABEL_MAP[label] || label;
 }
 
+function formatDateOnly(value) {
+  if (!value) return "-";
+
+  const str = String(value);
+  const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  const parsed = new Date(str);
+  if (!Number.isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, "0");
+    const d = String(parsed.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
+
+  return str;
+}
+
 const logoutBtn = document.getElementById("logoutBtn");
 const authStatus = document.getElementById("authStatus");
 
@@ -21,6 +41,8 @@ const tabPanels = {
 };
 
 const entryText = document.getElementById("entryText");
+const ocrImageInput = document.getElementById("ocrImageInput");
+const ocrBtn = document.getElementById("ocrBtn");
 const classifyBtn = document.getElementById("classifyBtn");
 const saveBtn = document.getElementById("saveBtn");
 const entryAiLabel = document.getElementById("entryAiLabel");
@@ -50,10 +72,22 @@ const state = {
   currentUser: "",
   labels: [],
   classified: null,
+  sourceType: "manual",
   page: 1,
   size: 8,
   total: 0
 };
+
+const PIE_COLORS = [
+  "#0f766e",
+  "#22c55e",
+  "#f59e0b",
+  "#f97316",
+  "#0ea5e9",
+  "#3b82f6",
+  "#ef4444",
+  "#9333ea"
+];
 
 function getApiBase() {
   return `${location.origin}/api/v1`;
@@ -103,6 +137,16 @@ async function apiPost(path, body, useAuth = true) {
     method: "POST",
     headers: useAuth ? authHeaders() : { "Content-Type": "application/json" },
     body: JSON.stringify(body)
+  });
+  return handleApiResponse(response);
+}
+
+async function apiPostForm(path, formData, useAuth = true) {
+  const headers = useAuth ? { Authorization: `Bearer ${state.token}` } : {};
+  const response = await fetch(`${getApiBase()}${path}`, {
+    method: "POST",
+    headers,
+    body: formData
   });
   return handleApiResponse(response);
 }
@@ -161,7 +205,7 @@ async function classifyText() {
     setEntryResult("请输入题目文本", "warn");
     return;
   }
-  const data = await apiPost("/ai/classify", { text }, false);
+  const data = await apiPost("/ai/classify", { text, source_type: state.sourceType }, false);
   state.classified = data;
   entryAiLabel.value = formatLabel(data.label);
   entryConfidence.value = `${(Number(data.confidence) * 100).toFixed(2)}%`;
@@ -186,7 +230,7 @@ async function saveQuestion() {
     ai_label: aiLabel,
     final_label: finalLabel,
     confidence,
-    source_type: "manual"
+    source_type: state.sourceType
   };
 
   const data = await apiPost("/questions", payload, true);
@@ -211,15 +255,46 @@ async function saveQuestion() {
   entryAiLabel.value = "";
   entryConfidence.value = "";
   state.classified = null;
+  state.sourceType = "manual";
+  if (ocrImageInput) {
+    ocrImageInput.value = "";
+  }
 
   await loadQuestions();
   await refreshBoard();
+}
+
+async function recognizeByImage() {
+  const file = ocrImageInput && ocrImageInput.files ? ocrImageInput.files[0] : null;
+  if (!file) {
+    setEntryResult("请先选择一张题目图片", "warn");
+    return;
+  }
+  if (!file.type || !file.type.startsWith("image/")) {
+    setEntryResult("仅支持图片文件", "warn");
+    return;
+  }
+
+  const formData = new FormData();
+  formData.append("file", file);
+
+  setEntryResult("图片识别中，请稍候...", "");
+  const data = await apiPostForm("/ocr/recognize", formData, true);
+  entryText.value = data.text || "";
+  state.classified = null;
+  state.sourceType = "ocr";
+  entryAiLabel.value = "";
+  entryConfidence.value = "";
+  setEntryResult(`识别完成 · 来源 ${data.source_type || "ocr"}`, "ok");
 }
 
 entryText.addEventListener("input", () => {
   state.classified = null;
   entryAiLabel.value = "";
   entryConfidence.value = "";
+  if (state.sourceType !== "ocr") {
+    state.sourceType = "manual";
+  }
 });
 
 function statusSelectHtml(questionId, currentStatus) {
@@ -236,10 +311,12 @@ function statusSelectHtml(questionId, currentStatus) {
 }
 
 function actionButtonsHtml(questionId) {
-  return [
-    `<button class="small ghost" data-action="edit" data-id="${questionId}">编辑</button>`,
-    `<button class="small ghost" data-action="delete" data-id="${questionId}">删除</button>`
-  ].join(" ");
+  return `
+    <span class="action-buttons">
+      <button class="small ghost" data-action="edit" data-id="${questionId}">编辑</button>
+      <button class="small ghost" data-action="delete" data-id="${questionId}">删除</button>
+    </span>
+  `;
 }
 
 async function loadQuestions() {
@@ -263,7 +340,7 @@ async function loadQuestions() {
       <td>${item.stem}</td>
       <td>${formatLabel(item.final_label)}</td>
       <td>${statusSelectHtml(item.id, item.mastery_status)}</td>
-      <td>${item.updated_at}</td>
+      <td>${formatDateOnly(item.updated_at)}</td>
       <td>${actionButtonsHtml(item.id)}</td>
     `;
     questionTbody.appendChild(tr);
@@ -330,18 +407,42 @@ async function refreshBoard() {
   if (!labels.length) {
     boardChart.textContent = "暂无数据";
   } else {
-    labels.forEach((label, idx) => {
+    const slices = labels.map((label, idx) => {
       const count = Number(counts[idx] || 0);
       const ratio = total > 0 ? (count / total) * 100 : 0;
-      const row = document.createElement("div");
-      row.className = "bar-item";
-      row.innerHTML = `
-        <span>${formatLabel(label)}</span>
-        <div class="bar-track"><div class="bar-fill" style="width:${ratio.toFixed(2)}%"></div></div>
-        <span>${count} (${ratio.toFixed(1)}%)</span>
-      `;
-      boardChart.appendChild(row);
+      return {
+        label: formatLabel(label),
+        count,
+        ratio,
+        color: PIE_COLORS[idx % PIE_COLORS.length]
+      };
     });
+
+    let current = 0;
+    const gradientParts = slices.map((slice) => {
+      const start = current;
+      current += slice.ratio;
+      return `${slice.color} ${start.toFixed(2)}% ${current.toFixed(2)}%`;
+    });
+
+    const pieBackground = total > 0
+      ? `conic-gradient(${gradientParts.join(",")})`
+      : "conic-gradient(#cbd5e1 0% 100%)";
+
+    boardChart.innerHTML = `
+      <div class="pie-layout">
+        <div class="pie-chart" style="background:${pieBackground}"></div>
+        <div class="pie-legend">
+          ${slices.map((slice) => `
+            <div class="pie-legend-item">
+              <span class="pie-dot" style="background:${slice.color}"></span>
+              <span class="pie-label">${slice.label}</span>
+              <span class="pie-value">${slice.count} (${slice.ratio.toFixed(1)}%)</span>
+            </div>
+          `).join("")}
+        </div>
+      </div>
+    `;
   }
 
   trendChart.innerHTML = "";
@@ -406,6 +507,19 @@ classifyBtn.addEventListener("click", async () => {
     setEntryResult(`分类失败：${error.message}`, "warn");
   }
 });
+
+if (ocrBtn) {
+  ocrBtn.addEventListener("click", async () => {
+    ocrBtn.disabled = true;
+    try {
+      await recognizeByImage();
+    } catch (error) {
+      setEntryResult(`识别失败：${error.message}`, "warn");
+    } finally {
+      ocrBtn.disabled = false;
+    }
+  });
+}
 
 saveBtn.addEventListener("click", async () => {
   try {

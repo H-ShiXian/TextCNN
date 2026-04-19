@@ -12,24 +12,26 @@ import hashlib
 import hmac
 import json
 import os
+import re
 import sqlite3
 import threading
 import uuid
 from datetime import datetime, timedelta
 
-from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, Header, HTTPException, Query, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, FastAPI, File, Header, HTTPException, Query, Request, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from config import DB_PATH, MODEL_VERSION
+from config import ADMIN_PASSWORD, DB_PATH, DEMO_PASSWORD, MODEL_VERSION, TRAIN_PATH
 from inference import TextClassifier
 
 
 class PredictRequest(BaseModel):
     text: str = Field(..., min_length=1, description="待分类文本")
+    source_type: str = Field(default="manual")
 
 
 class PredictResponse(BaseModel):
@@ -146,13 +148,30 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-classifier = TextClassifier()
-web_dir = Path("web")
+classifier = TextClassifier.from_files()
+web_dir = Path(__file__).resolve().parent / "web"
 
 ROLE_SET = {"student", "admin"}
 MASTERY_SET = {"unreviewed", "reviewed", "mastered", "careless"}
 SOURCE_TYPE_SET = {"manual", "import", "ocr"}
 WRITE_STATUS_SET = {"pending", "written", "failed"}
+OCR_KEYWORD_PRIOR: dict[str, tuple[str, ...]] = {
+    "computer_network": (
+        "tcp", "udp", "ip", "dns", "arp", "http", "https", "osi", "路由", "交换", "网关", "子网", "掩码", "带宽", "吞吐",
+    ),
+    "data_structure": (
+        "链表", "栈", "队列", "数组", "哈希", "二叉树", "红黑树", "堆", "图", "排序", "查找", "dfs", "bfs", "复杂度",
+    ),
+    "operating_system": (
+        "进程", "线程", "死锁", "调度", "虚拟内存", "页面", "页表", "中断", "信号量", "系统调用", "文件系统", "临界区",
+    ),
+    "computer_architecture": (
+        "cpu", "cache", "寄存器", "总线", "流水线", "指令", "寻址", "冯诺依曼", "控制器", "alu", "主存", "中断向量",
+    ),
+    "xiaosi": (
+        "马克思", "毛泽东", "邓小平", "中国特色社会主义", "辩证", "唯物", "社会", "政治", "理论", "思想",
+    ),
+}
 CORPUS_FLUSH_LOCK = threading.Lock()
 CORPUS_FLUSH_STATE: dict[str, Any] = {
     "running": False,
@@ -163,6 +182,7 @@ CORPUS_FLUSH_STATE: dict[str, Any] = {
     "failed": 0,
     "last_error": None,
 }
+OCR_ENGINE: Any | None = None
 
 app.mount("/web", StaticFiles(directory=str(web_dir)), name="web")
 
@@ -342,8 +362,8 @@ def init_db() -> None:
             """,
             ("admin_user", "admin_user", "admin", now, now),
         )
-        demo_hash = _hash_password("demo123456")
-        admin_hash = _hash_password("admin123456")
+        demo_hash = _hash_password(DEMO_PASSWORD)
+        admin_hash = _hash_password(ADMIN_PASSWORD)
         conn.execute("UPDATE users SET password_hash=?, updated_at=? WHERE id='demo_user' AND (password_hash IS NULL OR password_hash='')", (demo_hash, now))
         conn.execute("UPDATE users SET password_hash=?, updated_at=? WHERE id='admin_user' AND (password_hash IS NULL OR password_hash='')", (admin_hash, now))
         conn.execute(
@@ -403,15 +423,107 @@ async def generic_exception_handler(_: Request, exc: Exception):
     )
 
 
-def _predict_text(text: str):
-    cleaned = text.strip()
+def _normalize_text_for_classify(text: str, source_type: str = "manual") -> str:
+    cleaned = " ".join(text.strip().split())
+    if source_type != "ocr":
+        return cleaned
+
+    cleaned = cleaned.lower()
+    cleaned = re.sub(r"[\r\n\t]+", " ", cleaned)
+    cleaned = re.sub(r"[|丨_~`]+", " ", cleaned)
+    cleaned = re.sub(r"\b[a-d]\s*[\.\):：]", " ", cleaned)
+    cleaned = re.sub(r"[^0-9a-z\u4e00-\u9fff\s]", " ", cleaned)
+    cleaned = re.sub(r"\s{2,}", " ", cleaned)
+    return cleaned.strip()
+
+
+def _keyword_prior_for_ocr(text: str) -> dict[str, float]:
+    hit_count: dict[str, int] = {label: 0 for label in classifier.label2idx.keys()}
+    for label, keywords in OCR_KEYWORD_PRIOR.items():
+        if label not in hit_count:
+            continue
+        count = 0
+        for kw in keywords:
+            if kw and kw in text:
+                count += 1
+        hit_count[label] = count
+
+    total = sum(hit_count.values())
+    if total == 0:
+        return {label: 0.0 for label in hit_count.keys()}
+    return {label: hit_count[label] / total for label in hit_count.keys()}
+
+
+def _predict_text(text: str, source_type: str = "manual"):
+    cleaned = _normalize_text_for_classify(text, source_type)
     if not cleaned:
         raise HTTPException(status_code=400, detail="text 不能为空")
 
     try:
-        return classifier.predict(cleaned)
+        model_scores = classifier.predict_proba(cleaned)
+        if source_type == "ocr":
+            prior_scores = _keyword_prior_for_ocr(cleaned)
+            top_model_conf = max(model_scores.values()) if model_scores else 0.0
+            alpha = 0.85 if top_model_conf >= 0.7 else 0.65
+            fused_scores = {
+                label: alpha * model_scores.get(label, 0.0) + (1 - alpha) * prior_scores.get(label, 0.0)
+                for label in classifier.label2idx.keys()
+            }
+            label, confidence = max(fused_scores.items(), key=lambda x: x[1])
+            return {"label": label, "confidence": float(confidence)}
+
+        label, confidence = max(model_scores.items(), key=lambda x: x[1])
+        return {"label": label, "confidence": float(confidence)}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"预测失败: {exc}") from exc
+
+
+def _get_ocr_engine() -> Any:
+    global OCR_ENGINE
+    if OCR_ENGINE is not None:
+        return OCR_ENGINE
+
+    try:
+        from rapidocr_onnxruntime import RapidOCR
+    except Exception as exc:
+        raise HTTPException(
+            status_code=503,
+            detail=f"OCR 组件未安装或初始化失败: {exc}",
+        ) from exc
+
+    OCR_ENGINE = RapidOCR()
+    return OCR_ENGINE
+
+
+def _ocr_extract_text(image_bytes: bytes) -> str:
+    if not image_bytes:
+        raise HTTPException(status_code=400, detail="上传图片为空")
+
+    try:
+        import cv2
+        import numpy as np
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"OCR 运行依赖缺失: {exc}") from exc
+
+    np_buf = np.frombuffer(image_bytes, dtype=np.uint8)
+    image = cv2.imdecode(np_buf, cv2.IMREAD_COLOR)
+    if image is None:
+        raise HTTPException(status_code=400, detail="图片解码失败，请检查文件格式")
+
+    engine = _get_ocr_engine()
+    result, _ = engine(image)
+    if not result:
+        return ""
+
+    lines: list[str] = []
+    for item in result:
+        if len(item) < 2:
+            continue
+        text_part = str(item[1]).strip()
+        if text_part:
+            lines.append(text_part)
+
+    return "\n".join(lines).strip()
 
 
 def _parse_bearer_token(authorization: str | None) -> str:
@@ -470,7 +582,7 @@ def _append_training_line(label: str, question_text: str) -> None:
     clean_text = " ".join(question_text.strip().split())
     if not clean_text:
         raise ValueError("question_text 为空")
-    with open("data/train.txt", "a", encoding="utf-8") as f:
+    with open(TRAIN_PATH, "a", encoding="utf-8") as f:
         f.write(f"{label} {clean_text}\n")
 
 
@@ -720,13 +832,40 @@ def register(payload: RegisterRequest):
     },
 )
 def classify_v1(payload: PredictRequest):
-    result = _predict_text(payload.text)
+    source_type = payload.source_type.strip().lower() if payload.source_type else "manual"
+    if source_type not in SOURCE_TYPE_SET:
+        raise HTTPException(status_code=400, detail=f"source_type 非法: {source_type}")
+
+    result = _predict_text(payload.text, source_type=source_type)
     conn = _connect_db()
     try:
         model_version = _get_active_model_version(conn)
     finally:
         conn.close()
     return ok(ClassifyResponse(**result, model_version=model_version).model_dump())
+
+
+@api_router.post("/ocr/recognize", response_model=ApiResponse)
+async def ocr_recognize(file: UploadFile = File(...), _: dict[str, str] = Depends(get_current_user)):
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="仅支持图片文件")
+
+    image_bytes = await file.read()
+    if len(image_bytes) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="图片大小不能超过 10MB")
+
+    text = _ocr_extract_text(image_bytes)
+    if not text:
+        raise HTTPException(status_code=400, detail="未识别到可用文本")
+
+    return ok(
+        {
+            "text": text,
+            "filename": file.filename,
+            "source_type": "ocr",
+        },
+        "图片识别成功",
+    )
 
 
 @api_router.post("/questions", response_model=ApiResponse)
@@ -1327,7 +1466,10 @@ def activate_model(payload: ActivateModelRequest, _: dict[str, str] = Depends(ge
     },
 )
 def predict_v1(payload: PredictRequest):
-    result = _predict_text(payload.text)
+    source_type = payload.source_type.strip().lower() if payload.source_type else "manual"
+    if source_type not in SOURCE_TYPE_SET:
+        raise HTTPException(status_code=400, detail=f"source_type 非法: {source_type}")
+    result = _predict_text(payload.text, source_type=source_type)
     return ok(PredictResponse(**result).model_dump())
 
 
@@ -1362,7 +1504,7 @@ def predict_by_query(text: str = Query(default="", description="待分类文本"
             "new_api": "/api/v1/predict",
         }, "请输入 text 查询参数")
 
-    result = _predict_text(text)
+    result = _predict_text(text, source_type="manual")
     return ok(PredictResponse(**result).model_dump())
 
 
@@ -1389,7 +1531,10 @@ def predict_by_query(text: str = Query(default="", description="待分类文本"
     },
 )
 def predict(payload: PredictRequest):
-    result = _predict_text(payload.text)
+    source_type = payload.source_type.strip().lower() if payload.source_type else "manual"
+    if source_type not in SOURCE_TYPE_SET:
+        raise HTTPException(status_code=400, detail=f"source_type 非法: {source_type}")
+    result = _predict_text(payload.text, source_type=source_type)
     return ok(PredictResponse(**result).model_dump())
 
 

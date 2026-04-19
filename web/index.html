@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/web/style.css" />
+  <link rel="stylesheet" href="/web/style.css?v=20260419" />
 </head>
 <body>
   <main class="shell">
@@ -36,6 +36,10 @@
     <section id="tab-entry" class="panel active">
       <h2>录入</h2>
       <textarea id="entryText" placeholder="请输入题目文本..."></textarea>
+      <div class="row wrap">
+        <input id="ocrImageInput" type="file" accept="image/*" />
+        <button id="ocrBtn" class="ghost" type="button">图片识别</button>
+      </div>
       
       <div class="btn-group-full">
         <button id="classifyBtn" class="primary btn-large spread-btn" type="button">
@@ -111,6 +115,6 @@
       <div id="weakTopics" class="bars"></div>
     </section>
   </main>
-  <script src="/web/app.js"></script>
+  <script src="/web/app.js?v=20260419"></script>
 </body>
 </html>

@@ -77,14 +77,6 @@ class TextCNN(nn.Module):
 
         # 3. 每种卷积核分别处理：卷积 → 激活 → 池化
         conv_results = []
-        # for conv ,bn in zip(self.convs,self.bns):
-        #     c = F.relu(conv(x))         # 卷积 + ReLU → (batch_size, 100, new_len, 1)
-        #     c = c.squeeze(3)            # 去掉最后一维 → (batch_size, 100, new_len)
-        #     c = bn(c) 
-        #     p = F.max_pool1d(c, c.size(2))  # 最大池化 → (batch_size, 100, 1)
-        #     p = p.squeeze(2)            # 去掉最后一维 → (batch_size, 100)
-        #     conv_results.append(p)
-
         for conv, bn in zip(self.convs, self.bns):
 
             c = conv(x)          # Conv
