@@ -47,10 +47,19 @@
     <section id="tab-entry" class="panel active">
       <h2>01 录入中心</h2>
       <p class="section-note">支持手动录入、图片识别与 AI 解析，保存后将自动进入统计分析。</p>
-      <textarea id="entryText" placeholder="请输入题目文本..." aria-label="题目文本"></textarea>
-      <div class="row wrap">
-        <input id="ocrImageInput" type="file" accept="image/*" aria-label="上传题目图片" />
-        <button id="ocrBtn" class="ghost" type="button">图片识别</button>
+      <div class="entry-input-wrap">
+        <textarea id="entryText" placeholder="请输入题目文本..." aria-label="题目文本"></textarea>
+        <div class="entry-input-toolbar">
+          <button id="entryImagePickerBtn" class="tool-btn tool-btn-primary" type="button" aria-label="上传图片" title="上传图片">上传图片</button>
+          <button id="pasteImageBtn" class="tool-btn" type="button" aria-label="粘贴图片" title="粘贴图片">粘贴图片</button>
+          <button id="clearImageBtn" class="tool-btn" type="button" aria-label="清除图片" title="清除图片" disabled>清除图片</button>
+          <button id="clearTextBtn" class="tool-btn" type="button" aria-label="清空文字" title="清空文字" disabled>清空文字</button>
+          <button id="ocrBtn" class="tool-btn" type="button" aria-label="OCR识别" title="OCR识别">OCR识别</button>
+        </div>
+        <input id="ocrImageInput" class="sr-only-file" type="file" accept="image/*" aria-label="上传题目图片" />
+      </div>
+      <div class="entry-image-meta-row">
+        <div id="entryImageMeta" class="hint">未导入图片。可点击“上传图片”或“粘贴图片”导入。</div>
       </div>
       
       <div class="btn-group-full">

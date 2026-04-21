@@ -41,6 +41,11 @@ const tabPanels = {
 };
 
 const entryText = document.getElementById("entryText");
+const entryImagePickerBtn = document.getElementById("entryImagePickerBtn");
+const pasteImageBtn = document.getElementById("pasteImageBtn");
+const entryImageMeta = document.getElementById("entryImageMeta");
+const clearImageBtn = document.getElementById("clearImageBtn");
+const clearTextBtn = document.getElementById("clearTextBtn");
 const ocrImageInput = document.getElementById("ocrImageInput");
 const ocrBtn = document.getElementById("ocrBtn");
 const classifyBtn = document.getElementById("classifyBtn");
@@ -90,6 +95,8 @@ const PIE_COLORS = [
   "#9333ea"
 ];
 
+const ENTRY_IMAGE_META_DEFAULT = "未导入图片。可点击“上传图片”或“粘贴图片”导入。";
+
 function getApiBase() {
   return `${location.origin}/api/v1`;
 }
@@ -97,6 +104,115 @@ function getApiBase() {
 function setEntryResult(msg, type = "") {
   entryResult.className = `result ${type}`.trim();
   entryResult.textContent = msg;
+}
+
+function setEntryImageMeta(message) {
+  if (!entryImageMeta) return;
+  entryImageMeta.textContent = message;
+}
+
+function setClearImageButtonEnabled(enabled) {
+  if (!clearImageBtn) return;
+  clearImageBtn.disabled = !enabled;
+}
+
+function setClearTextButtonEnabled(enabled) {
+  if (!clearTextBtn) return;
+  clearTextBtn.disabled = !enabled;
+}
+
+function resetEntryClassificationState() {
+  state.classified = null;
+  entryAiLabel.value = "";
+  entryConfidence.value = "";
+  if (state.sourceType !== "ocr") {
+    state.sourceType = "manual";
+  }
+}
+
+function formatFileSize(fileSize) {
+  if (!Number.isFinite(fileSize) || fileSize <= 0) return "-";
+  if (fileSize >= 1024 * 1024) {
+    return `${(fileSize / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  return `${Math.max(1, Math.round(fileSize / 1024))} KB`;
+}
+
+function setSelectedImageMeta(file, fromLabel) {
+  if (!file) {
+    setEntryImageMeta(ENTRY_IMAGE_META_DEFAULT);
+    setClearImageButtonEnabled(false);
+    return;
+  }
+  const size = formatFileSize(Number(file.size || 0));
+  setEntryImageMeta(`已${fromLabel}图片：${file.name}（${size}）。可点击“OCR识别”提取文字。`);
+  setClearImageButtonEnabled(true);
+}
+
+function setImageToInput(file, fromLabel = "导入") {
+  if (!ocrImageInput || !file) return;
+  const transfer = new DataTransfer();
+  transfer.items.add(file);
+  ocrImageInput.files = transfer.files;
+  setSelectedImageMeta(file, fromLabel);
+}
+
+function clearSelectedImage(showMsg = true) {
+  if (ocrImageInput) {
+    ocrImageInput.value = "";
+  }
+  setSelectedImageMeta(null, "");
+  if (showMsg) {
+    setEntryResult("已清除当前图片，可重新上传或粘贴新图片", "ok");
+  }
+}
+
+function clearEntryText(showMsg = true) {
+  if (!entryText) return;
+  if (!entryText.value.trim()) {
+    setClearTextButtonEnabled(false);
+    if (showMsg) {
+      setEntryResult("输入框已是空白", "warn");
+    }
+    return;
+  }
+
+  entryText.value = "";
+  resetEntryClassificationState();
+  setClearTextButtonEnabled(false);
+  entryText.focus();
+  if (showMsg) {
+    setEntryResult("已清空输入框文字", "ok");
+  }
+}
+
+function fileFromClipboardBlob(blob) {
+  const ext = (blob.type || "image/png").split("/")[1] || "png";
+  const fileName = `pasted-image-${Date.now()}.${ext === "jpeg" ? "jpg" : ext}`;
+  return new File([blob], fileName, {
+    type: blob.type || "image/png",
+    lastModified: Date.now()
+  });
+}
+
+async function pasteImageFromClipboard() {
+  if (!navigator.clipboard || !navigator.clipboard.read) {
+    setEntryResult("当前浏览器不支持按钮读取剪贴板，请在输入框内按 Ctrl+V", "warn");
+    return;
+  }
+
+  const items = await navigator.clipboard.read();
+  for (const item of items) {
+    const imageType = item.types.find((type) => type.startsWith("image/"));
+    if (!imageType) continue;
+    const blob = await item.getType(imageType);
+    const pastedFile = fileFromClipboardBlob(blob);
+    setImageToInput(pastedFile, "粘贴");
+    setEntryResult("图片已从剪贴板导入，可点击“OCR识别”提取文字", "ok");
+    return;
+  }
+
+  setEntryResult("剪贴板中未检测到图片", "warn");
 }
 
 function setButtonLoading(button, loading, loadingText) {
@@ -271,9 +387,7 @@ async function saveQuestion() {
   entryConfidence.value = "";
   state.classified = null;
   state.sourceType = "manual";
-  if (ocrImageInput) {
-    ocrImageInput.value = "";
-  }
+  clearSelectedImage(false);
 
   await loadQuestions();
   await refreshBoard();
@@ -282,7 +396,7 @@ async function saveQuestion() {
 async function recognizeByImage() {
   const file = ocrImageInput && ocrImageInput.files ? ocrImageInput.files[0] : null;
   if (!file) {
-    setEntryResult("请先选择一张题目图片", "warn");
+    setEntryResult("请先粘贴图片或点击左下角 + 导入图片", "warn");
     return;
   }
   if (!file.type || !file.type.startsWith("image/")) {
@@ -343,12 +457,25 @@ async function parseImageToAnalysis() {
 }
 
 entryText.addEventListener("input", () => {
-  state.classified = null;
-  entryAiLabel.value = "";
-  entryConfidence.value = "";
-  if (state.sourceType !== "ocr") {
-    state.sourceType = "manual";
-  }
+  resetEntryClassificationState();
+  setClearTextButtonEnabled(Boolean(entryText.value.trim()));
+});
+
+entryText.addEventListener("paste", (event) => {
+  const clipboardData = event.clipboardData;
+  if (!clipboardData || !clipboardData.items) return;
+
+  const imageItem = Array.from(clipboardData.items).find((item) => item.type && item.type.startsWith("image/"));
+  if (!imageItem) return;
+
+  const fileFromClipboard = imageItem.getAsFile();
+  if (!fileFromClipboard) return;
+
+  event.preventDefault();
+  const pastedFile = fileFromClipboardBlob(fileFromClipboard);
+
+  setImageToInput(pastedFile, "粘贴");
+  setEntryResult("图片已粘贴导入，点击“OCR识别”即可提取文字", "ok");
 });
 
 function statusSelectHtml(questionId, currentStatus) {
@@ -576,8 +703,49 @@ if (ocrBtn) {
     } catch (error) {
       setEntryResult(`识别失败：${error.message}`, "warn");
     } finally {
-      setButtonLoading(ocrBtn, false, "图片识别");
+      setButtonLoading(ocrBtn, false, "OCR识别");
     }
+  });
+}
+
+if (pasteImageBtn) {
+  pasteImageBtn.addEventListener("click", async () => {
+    setButtonLoading(pasteImageBtn, true, "读取中...");
+    try {
+      await pasteImageFromClipboard();
+    } catch (error) {
+      setEntryResult(`粘贴失败：${error.message}`, "warn");
+    } finally {
+      setButtonLoading(pasteImageBtn, false, "粘贴图片");
+    }
+  });
+}
+
+if (entryImagePickerBtn && ocrImageInput) {
+  entryImagePickerBtn.addEventListener("click", () => {
+    ocrImageInput.click();
+  });
+
+  ocrImageInput.addEventListener("change", () => {
+    const file = ocrImageInput.files && ocrImageInput.files[0] ? ocrImageInput.files[0] : null;
+    if (!file) {
+      setSelectedImageMeta(null, "");
+      return;
+    }
+    setSelectedImageMeta(file, "选择");
+    setEntryResult("图片已导入，点击“OCR识别”即可提取文字", "ok");
+  });
+}
+
+if (clearImageBtn) {
+  clearImageBtn.addEventListener("click", () => {
+    clearSelectedImage(true);
+  });
+}
+
+if (clearTextBtn) {
+  clearTextBtn.addEventListener("click", () => {
+    clearEntryText(true);
   });
 }
 
@@ -692,6 +860,9 @@ refreshBoardBtn.addEventListener("click", async () => {
     }
     await loadQuestions();
     await refreshBoard();
+    setEntryImageMeta(ENTRY_IMAGE_META_DEFAULT);
+    setClearImageButtonEnabled(false);
+    setClearTextButtonEnabled(Boolean(entryText.value.trim()));
   } catch (error) {
     setEntryResult(`初始化失败：${error.message}`, "warn");
   }
