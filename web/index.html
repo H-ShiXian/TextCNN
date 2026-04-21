@@ -7,16 +7,27 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/web/style.css?v=20260419" />
+  <link rel="stylesheet" href="/web/style.css?v=20260421-main" />
 </head>
 <body>
   <main class="shell">
     <header class="hero">
-      <div class="hero-brand">
-        <div class="logo-circle-small">
-          <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+      <div class="hero-main">
+        <div class="hero-kicker">STUDY OPS CONSOLE</div>
+        <div class="hero-brand">
+          <div class="logo-circle-small">
+            <svg viewBox="0 0 24 24" width="24" height="24" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+          </div>
+          <div>
+            <h1>星火 · 智能错题空间</h1>
+            <p class="hero-sub">从错因定位到复习闭环，一站式学习追踪面板</p>
+          </div>
         </div>
-        <h1>星火 · 智能错题空间</h1>
+        <div class="hero-tags">
+          <span>AI 分类</span>
+          <span>OCR 识别</span>
+          <span>趋势分析</span>
+        </div>
       </div>
       <div class="user-profile">
         <div class="avatar">
@@ -34,10 +45,11 @@
     </nav>
 
     <section id="tab-entry" class="panel active">
-      <h2>录入</h2>
-      <textarea id="entryText" placeholder="请输入题目文本..."></textarea>
+      <h2>01 录入中心</h2>
+      <p class="section-note">支持手动录入、图片识别与 AI 解析，保存后将自动进入统计分析。</p>
+      <textarea id="entryText" placeholder="请输入题目文本..." aria-label="题目文本"></textarea>
       <div class="row wrap">
-        <input id="ocrImageInput" type="file" accept="image/*" />
+        <input id="ocrImageInput" type="file" accept="image/*" aria-label="上传题目图片" />
         <button id="ocrBtn" class="ghost" type="button">图片识别</button>
       </div>
       
@@ -63,12 +75,12 @@
         <select id="entryFinalLabel"></select>
         <button id="parseBtn" class="ghost" type="button">解析</button>
       </div>
-      <textarea id="entryAnalysis" placeholder="解析（可选）"></textarea>
+      <textarea id="entryAnalysis" placeholder="解析（可选）" aria-label="题目解析"></textarea>
       <div id="entryResult" class="result">就绪</div>
     </section>
 
     <section id="tab-list" class="panel">
-      <h2>记录</h2>
+      <h2>02 记录总览</h2>
       <div class="row wrap">
         <label for="filterLabel">学科</label>
         <select id="filterLabel"><option value="">全部</option></select>
@@ -85,18 +97,20 @@
         <button id="searchBtn" class="primary" type="button">查询</button>
       </div>
       <div id="listMeta" class="hint">-</div>
-      <table>
-        <thead>
-          <tr>
-            <th>题干</th>
-            <th>类别</th>
-            <th>状态</th>
-            <th>更新时间</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody id="questionTbody"></tbody>
-      </table>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>题干</th>
+              <th>类别</th>
+              <th>状态</th>
+              <th>更新时间</th>
+              <th>操作</th>
+            </tr>
+          </thead>
+          <tbody id="questionTbody"></tbody>
+        </table>
+      </div>
       <div class="row">
         <button id="prevPageBtn" class="ghost" type="button">上一页</button>
         <button id="nextPageBtn" class="ghost" type="button">下一页</button>
@@ -104,18 +118,22 @@
     </section>
 
     <section id="tab-board" class="panel">
-      <h2>分析</h2>
+      <h2>03 学习分析</h2>
       <button id="refreshBoardBtn" class="primary" type="button">刷新</button>
       <div id="boardTotal" class="hint">总题数：0</div>
       <div id="masteryOverview" class="cards"></div>
       <h3>学科分布</h3>
       <div id="boardChart" class="bars"></div>
       <h3>近 7 天趋势</h3>
+      <div class="legend-inline">
+        <span class="dot trend-created"></span><span>新录入</span>
+        <span class="dot trend-reviewed"></span><span>已复习</span>
+      </div>
       <div id="trendChart" class="bars"></div>
       <h3>薄弱学科</h3>
       <div id="weakTopics" class="bars"></div>
     </section>
   </main>
-  <script src="/web/app.js?v=20260419"></script>
+  <script src="/web/app.js?v=20260421-main"></script>
 </body>
 </html>

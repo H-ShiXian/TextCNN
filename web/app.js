@@ -99,6 +99,20 @@ function setEntryResult(msg, type = "") {
   entryResult.textContent = msg;
 }
 
+function setButtonLoading(button, loading, loadingText) {
+  if (!button) return;
+  if (loading) {
+    button.dataset.originalHtml = button.innerHTML;
+    button.textContent = loadingText;
+    button.disabled = true;
+    return;
+  }
+  if (button.dataset.originalHtml) {
+    button.innerHTML = button.dataset.originalHtml;
+  }
+  button.disabled = false;
+}
+
 function switchTab(name) {
   tabs.forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.tab === name);
@@ -408,6 +422,9 @@ async function editLabel(questionId) {
 }
 
 async function softDelete(questionId) {
+  const confirmed = confirm("确认删除这条错题记录吗？");
+  if (!confirmed) return;
+
   const response = await fetch(`${getApiBase()}/questions/${questionId}`, {
     method: "DELETE",
     headers: { Authorization: `Bearer ${state.token}` }
@@ -541,53 +558,62 @@ logoutBtn.addEventListener("click", () => {
 });
 
 classifyBtn.addEventListener("click", async () => {
+  setButtonLoading(classifyBtn, true, "分类中...");
   try {
     await classifyText();
   } catch (error) {
     setEntryResult(`分类失败：${error.message}`, "warn");
+  } finally {
+    setButtonLoading(classifyBtn, false, "分类");
   }
 });
 
 if (ocrBtn) {
   ocrBtn.addEventListener("click", async () => {
-    ocrBtn.disabled = true;
+    setButtonLoading(ocrBtn, true, "识别中...");
     try {
       await recognizeByImage();
     } catch (error) {
       setEntryResult(`识别失败：${error.message}`, "warn");
     } finally {
-      ocrBtn.disabled = false;
+      setButtonLoading(ocrBtn, false, "图片识别");
     }
   });
 }
 
 if (parseBtn) {
   parseBtn.addEventListener("click", async () => {
-    parseBtn.disabled = true;
+    setButtonLoading(parseBtn, true, "解析中...");
     try {
       await parseImageToAnalysis();
     } catch (error) {
       setEntryResult(`解析失败：${error.message}`, "warn");
     } finally {
-      parseBtn.disabled = false;
+      setButtonLoading(parseBtn, false, "解析");
     }
   });
 }
 
 saveBtn.addEventListener("click", async () => {
+  setButtonLoading(saveBtn, true, "保存中...");
   try {
     await saveQuestion();
   } catch (error) {
     setEntryResult(`保存失败：${error.message}`, "warn");
+  } finally {
+    setButtonLoading(saveBtn, false, "确认保存");
   }
 });
 
 searchBtn.addEventListener("click", async () => {
+  setButtonLoading(searchBtn, true, "查询中...");
   try {
     state.page = 1;
     await loadQuestions();
   } catch (error) {
     listMeta.textContent = `查询失败：${error.message}`;
+  } finally {
+    setButtonLoading(searchBtn, false, "查询");
   }
 });
 
@@ -645,10 +671,13 @@ questionTbody.addEventListener("click", async (event) => {
 });
 
 refreshBoardBtn.addEventListener("click", async () => {
+  setButtonLoading(refreshBoardBtn, true, "刷新中...");
   try {
     await refreshBoard();
   } catch (error) {
     boardTotal.textContent = `刷新失败：${error.message}`;
+  } finally {
+    setButtonLoading(refreshBoardBtn, false, "刷新");
   }
 });
 

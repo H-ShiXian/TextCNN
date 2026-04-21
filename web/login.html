@@ -11,32 +11,45 @@
 </head>
 <body>
   <main class="login-shell">
-    <section class="login-card">
-      <div class="login-header">
+    <section class="login-layout">
+      <aside class="login-brand-panel">
         <div class="logo-circle">
-          <svg viewBox="0 0 24 24" width="32" height="32" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
+          <svg viewBox="0 0 24 24" width="34" height="34" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"></path></svg>
         </div>
         <h1>学习分析系统</h1>
-        <p class="login-sub">登录您的智能错题空间</p>
-      </div>
+        <p class="login-sub">把错题变成可追踪、可复盘、可提升的数据资产。</p>
+        <ul class="feature-list">
+          <li>自动学科分类</li>
+          <li>OCR 图片识别</li>
+          <li>掌握率与趋势看板</li>
+        </ul>
+      </aside>
 
-      <form id="loginForm" class="login-form">
-        <div class="input-group">
-          <label for="username">用户名</label>
-          <input id="username" type="text" placeholder="请输入用户名" autocomplete="username" />
-        </div>
-        <div class="input-group">
-          <label for="password">密码</label>
-          <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password" />
+      <div class="login-card">
+        <div class="login-header">
+          <h2>欢迎回来</h2>
+          <p>使用账号密码继续你的复习计划</p>
         </div>
 
-        <div class="auth-actions">
-          <button id="loginBtn" class="primary btn-large" type="button">登 录</button>
-          <button id="registerBtn" class="ghost btn-large" type="button">注 册</button>
-        </div>
-      </form>
+        <form id="loginForm" class="login-form">
+          <div class="input-group">
+            <label for="username">用户名</label>
+            <input id="username" type="text" placeholder="请输入用户名" autocomplete="username" aria-label="用户名" />
+          </div>
+          <div class="input-group">
+            <label for="password">密码</label>
+            <input id="password" type="password" placeholder="请输入密码" autocomplete="current-password" aria-label="密码" />
+          </div>
+          <p class="login-tip">首次使用请先注册，再使用同一账号登录。</p>
 
-      <div id="authStatus" class="hint auth-footer">
+          <div class="auth-actions">
+            <button id="loginBtn" class="primary btn-large" type="button">登 录</button>
+            <button id="registerBtn" class="ghost btn-large" type="button">注 册</button>
+          </div>
+        </form>
+
+        <div id="authStatus" class="hint auth-footer">
+        </div>
       </div>
     </section>
   </main>

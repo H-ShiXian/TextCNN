@@ -4,6 +4,20 @@ const registerBtn = document.getElementById("registerBtn");
 const loginBtn = document.getElementById("loginBtn");
 const authStatus = document.getElementById("authStatus");
 
+function setButtonLoading(button, loading, loadingText) {
+  if (!button) return;
+  if (loading) {
+    button.dataset.originalHtml = button.innerHTML;
+    button.textContent = loadingText;
+    button.disabled = true;
+    return;
+  }
+  if (button.dataset.originalHtml) {
+    button.innerHTML = button.dataset.originalHtml;
+  }
+  button.disabled = false;
+}
+
 function getApiBase() {
   return `${location.origin}/api/v1`;
 }
@@ -49,20 +63,33 @@ async function handleRegister() {
 }
 
 loginBtn.addEventListener("click", async () => {
+  setButtonLoading(loginBtn, true, "登录中...");
   try {
     await handleLogin();
   } catch (error) {
     authStatus.textContent = `登录失败：${error.message}`;
     authStatus.className = "hint auth-footer warn";
+  } finally {
+    setButtonLoading(loginBtn, false, "登 录");
   }
 });
 
 registerBtn.addEventListener("click", async () => {
+  setButtonLoading(registerBtn, true, "注册中...");
   try {
     await handleRegister();
   } catch (error) {
     authStatus.textContent = `注册失败：${error.message}`;
     authStatus.className = "hint auth-footer warn";
+  } finally {
+    setButtonLoading(registerBtn, false, "注 册");
+  }
+});
+
+passwordInput.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    loginBtn.click();
   }
 });
 
