@@ -363,6 +363,9 @@ textarea {
 }
 
 .tool-btn-primary:hover {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(130deg, var(--cool), #10ab9c);
   transform: translate(-1px, -1px);
 }
 
