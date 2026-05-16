@@ -37,7 +37,8 @@ const tabs = Array.from(document.querySelectorAll(".tab"));
 const tabPanels = {
   entry: document.getElementById("tab-entry"),
   list: document.getElementById("tab-list"),
-  board: document.getElementById("tab-board")
+  board: document.getElementById("tab-board"),
+  practice: document.getElementById("tab-practice")
 };
 
 const entryText = document.getElementById("entryText");
@@ -72,6 +73,15 @@ const boardChart = document.getElementById("boardChart");
 const masteryOverview = document.getElementById("masteryOverview");
 const trendChart = document.getElementById("trendChart");
 const weakTopics = document.getElementById("weakTopics");
+const weakKnowledgePoints = document.getElementById("weakKnowledgePoints");
+
+const practiceCount = document.getElementById("practiceCount");
+const practiceStartBtn = document.getElementById("practiceStartBtn");
+const practiceSubmitBtn = document.getElementById("practiceSubmitBtn");
+const practiceMeta = document.getElementById("practiceMeta");
+const practiceQuestionList = document.getElementById("practiceQuestionList");
+const practiceResult = document.getElementById("practiceResult");
+const practiceHistory = document.getElementById("practiceHistory");
 
 const state = {
   token: "",
@@ -81,7 +91,9 @@ const state = {
   sourceType: "manual",
   page: 1,
   size: 8,
-  total: 0
+  total: 0,
+  practiceSessionId: "",
+  practiceQuestions: []
 };
 
 const PIE_COLORS = [
@@ -227,6 +239,116 @@ function setButtonLoading(button, loading, loadingText) {
     button.innerHTML = button.dataset.originalHtml;
   }
   button.disabled = false;
+}
+
+function setPracticeResult(message, type = "") {
+  if (!practiceResult) return;
+  practiceResult.className = `result ${type}`.trim();
+  practiceResult.textContent = message;
+}
+
+function renderPracticeQuestions(questions) {
+  if (!practiceQuestionList) return;
+  practiceQuestionList.innerHTML = "";
+  if (!questions || !questions.length) {
+    practiceQuestionList.textContent = "暂无题目";
+    return;
+  }
+
+  questions.forEach((item, idx) => {
+    const card = document.createElement("div");
+    card.className = "practice-card";
+    const options = (item.options || []).map((opt) => {
+      const optionValue = String(opt).trim().charAt(0);
+      return `
+        <label class="practice-option">
+          <input type="radio" name="practice-${item.id}" value="${optionValue}" />
+          <span>${opt}</span>
+        </label>
+      `;
+    }).join("");
+
+    card.innerHTML = `
+      <div class="practice-title">${idx + 1}. ${item.stem}</div>
+      <div class="practice-meta-row">
+        <span class="badge">${formatLabel(item.label || "")}</span>
+        <span class="practice-kp">${item.knowledge_point || "未归类"}</span>
+        <span>选择题</span>
+      </div>
+      <div class="practice-options">${options}</div>
+    `;
+    practiceQuestionList.appendChild(card);
+  });
+}
+
+async function loadPracticeHistory() {
+  if (!practiceHistory) return;
+  const data = await apiGet("/practice/history?limit=8", true);
+  const items = data.items || [];
+  if (!items.length) {
+    practiceHistory.textContent = "暂无练习记录";
+    return;
+  }
+  practiceHistory.innerHTML = items.map((item) => {
+    const accuracy = item.total ? ((item.correct / item.total) * 100).toFixed(1) : "0.0";
+    return `
+      <div class="practice-history-item">
+        <div>
+          <strong>练习 ${formatDateOnly(item.created_at)}</strong>
+          <span class="badge">正确 ${item.correct}/${item.total}</span>
+        </div>
+        <div class="hint">正确率 ${accuracy}% · 错题 ${item.wrong}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+async function startPractice() {
+  const count = Number(practiceCount ? practiceCount.value : 5) || 5;
+  const data = await apiPost("/practice/start", { count }, true);
+  state.practiceSessionId = data.session_id;
+  state.practiceQuestions = data.questions || [];
+  renderPracticeQuestions(state.practiceQuestions);
+  if (practiceMeta) {
+    practiceMeta.textContent = `已生成 ${data.total || state.practiceQuestions.length} 题 · 会话 ${data.session_id}`;
+  }
+  if (practiceSubmitBtn) {
+    practiceSubmitBtn.disabled = false;
+  }
+  setPracticeResult("请完成作答后提交练习", "");
+}
+
+function collectPracticeAnswers() {
+  const answers = [];
+  state.practiceQuestions.forEach((item) => {
+    const selector = `input[name="practice-${item.id}"]:checked`;
+    const selected = document.querySelector(selector);
+    const value = selected ? selected.value : "";
+    answers.push({ question_id: item.id, answer: value });
+  });
+  return answers;
+}
+
+async function submitPractice() {
+  if (!state.practiceSessionId) {
+    throw new Error("请先开始练习");
+  }
+  const answers = collectPracticeAnswers();
+  if (answers.some((item) => !item.answer)) {
+    throw new Error("请完成所有题目后再提交");
+  }
+  const data = await apiPost("/practice/submit", { session_id: state.practiceSessionId, answers }, true);
+  const accuracy = ((Number(data.accuracy || 0) * 100).toFixed(1));
+  setPracticeResult(`提交成功 · 正确 ${data.correct}/${data.total} · 正确率 ${accuracy}%`, "ok");
+  state.practiceSessionId = "";
+  state.practiceQuestions = [];
+  if (practiceSubmitBtn) {
+    practiceSubmitBtn.disabled = true;
+  }
+  renderPracticeQuestions([]);
+  await loadQuestions();
+  await refreshBoard();
+  await loadPracticeHistory();
 }
 
 function switchTab(name) {
@@ -387,6 +509,7 @@ async function saveQuestion() {
   entryConfidence.value = "";
   state.classified = null;
   state.sourceType = "manual";
+  setClearTextButtonEnabled(false);
   clearSelectedImage(false);
 
   await loadQuestions();
@@ -410,10 +533,12 @@ async function recognizeByImage() {
   setEntryResult("图片识别中，请稍候...", "");
   const data = await apiPostForm("/ocr/recognize", formData, true);
   entryText.value = data.text || "";
+  entryText.dispatchEvent(new Event("input", { bubbles: true }));
   state.classified = null;
   state.sourceType = "ocr";
   entryAiLabel.value = "";
   entryConfidence.value = "";
+  setClearTextButtonEnabled(Boolean(entryText.value.trim()));
   setEntryResult(`识别完成 · 来源 ${data.source_type || "ocr"}`, "ok");
 }
 
@@ -453,6 +578,7 @@ async function parseImageToAnalysis() {
     entryConfidence.value = `${(Number(data.confidence) * 100).toFixed(2)}%`;
   }
   entryAnalysis.value = data.analysis || "";
+  setClearTextButtonEnabled(Boolean(entryText.value.trim()));
   setEntryResult("解析完成", "ok");
 }
 
@@ -571,6 +697,7 @@ async function refreshBoard() {
     apiGet("/dashboard/study-trend?days=7", true),
     apiGet("/dashboard/weak-topics", true)
   ]);
+  const weakKnowledgeData = await apiGet("/dashboard/weak-knowledge-points", true);
 
   const labels = subjectData.labels || [];
   const counts = subjectData.counts || [];
@@ -669,6 +796,25 @@ async function refreshBoard() {
       `;
       weakTopics.appendChild(row);
     });
+  }
+
+  if (weakKnowledgePoints) {
+    weakKnowledgePoints.innerHTML = "";
+    const kpItems = weakKnowledgeData.items || [];
+    if (!kpItems.length) {
+      weakKnowledgePoints.textContent = "暂无薄弱知识点数据";
+    } else {
+      kpItems.slice(0, 6).forEach((item) => {
+        const row = document.createElement("div");
+        row.className = "bar-item";
+        row.innerHTML = `
+          <span>${formatLabel(item.label)} · ${item.knowledge_point}</span>
+          <div class="bar-track"><div class="bar-fill weak-fill" style="width:${(Number(item.weak_rate || 0) * 100).toFixed(2)}%"></div></div>
+          <span>薄弱:${item.weak_cnt}/${item.total_cnt}</span>
+        `;
+        weakKnowledgePoints.appendChild(row);
+      });
+    }
   }
 }
 
@@ -849,6 +995,32 @@ refreshBoardBtn.addEventListener("click", async () => {
   }
 });
 
+if (practiceStartBtn) {
+  practiceStartBtn.addEventListener("click", async () => {
+    setButtonLoading(practiceStartBtn, true, "生成中...");
+    try {
+      await startPractice();
+    } catch (error) {
+      setPracticeResult(`开始失败：${error.message}`, "warn");
+    } finally {
+      setButtonLoading(practiceStartBtn, false, "开始练习");
+    }
+  });
+}
+
+if (practiceSubmitBtn) {
+  practiceSubmitBtn.addEventListener("click", async () => {
+    setButtonLoading(practiceSubmitBtn, true, "提交中...");
+    try {
+      await submitPractice();
+    } catch (error) {
+      setPracticeResult(`提交失败：${error.message}`, "warn");
+    } finally {
+      setButtonLoading(practiceSubmitBtn, false, "提交练习");
+    }
+  });
+}
+
 (async function bootstrap() {
   try {
     if (!ensureAuth()) {
@@ -860,6 +1032,7 @@ refreshBoardBtn.addEventListener("click", async () => {
     }
     await loadQuestions();
     await refreshBoard();
+    await loadPracticeHistory();
     setEntryImageMeta(ENTRY_IMAGE_META_DEFAULT);
     setClearImageButtonEnabled(false);
     setClearTextButtonEnabled(Boolean(entryText.value.trim()));

@@ -7,7 +7,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=ZCOOL+XiaoWei&family=IBM+Plex+Mono:wght@400;600&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="/web/style.css?v=20260421-main" />
+  <link rel="stylesheet" href="/web/style.css?v=20260516-fix" />
 </head>
 <body>
   <main class="shell">
@@ -42,6 +42,7 @@
       <button class="tab active" data-tab="entry" type="button">录入</button>
       <button class="tab" data-tab="list" type="button">记录</button>
       <button class="tab" data-tab="board" type="button">分析</button>
+      <button class="tab" data-tab="practice" type="button">练习</button>
     </nav>
 
     <section id="tab-entry" class="panel active">
@@ -141,8 +142,32 @@
       <div id="trendChart" class="bars"></div>
       <h3>薄弱学科</h3>
       <div id="weakTopics" class="bars"></div>
+      <h3>薄弱知识点</h3>
+      <div id="weakKnowledgePoints" class="bars"></div>
+    </section>
+
+    <section id="tab-practice" class="panel">
+      <h2>04 在线练习</h2>
+      <p class="section-note">根据薄弱知识点推荐题目，支持自评与选择题练习。</p>
+      <div class="row wrap">
+        <label for="practiceCount">题量</label>
+        <select id="practiceCount">
+          <option value="5">5 题</option>
+          <option value="8">8 题</option>
+          <option value="10">10 题</option>
+        </select>
+        <button id="practiceStartBtn" class="primary" type="button">开始练习</button>
+      </div>
+      <div id="practiceMeta" class="hint">未开始练习</div>
+      <div id="practiceQuestionList" class="practice-list"></div>
+      <div class="row">
+        <button id="practiceSubmitBtn" class="accent btn-large" type="button" disabled>提交练习</button>
+      </div>
+      <div id="practiceResult" class="result">-</div>
+      <h3>练习历史</h3>
+      <div id="practiceHistory" class="practice-history"></div>
     </section>
   </main>
-  <script src="/web/app.js?v=20260421-main"></script>
+  <script src="/web/app.js?v=20260516-fix"></script>
 </body>
 </html>
